@@ -1122,6 +1122,7 @@
           this.user = new rxjs__WEBPACK_IMPORTED_MODULE_1__.BehaviorSubject(null);
           this.signUpUrl = 'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyDi8b7mjzP1mpNx_e87ZxItpoH7zF6yvcY';
           this.signInUrl = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyDi8b7mjzP1mpNx_e87ZxItpoH7zF6yvcY';
+          this.refreshTokenUrl = 'https://securetoken.googleapis.com/v1/token?key=AIzaSyDi8b7mjzP1mpNx_e87ZxItpoH7zF6yvcY';
         }
 
         _createClass(_AuthService, [{
@@ -1154,18 +1155,56 @@
             }).pipe((0, rxjs_operators__WEBPACK_IMPORTED_MODULE_2__.catchError)(function (error) {
               return (0, rxjs__WEBPACK_IMPORTED_MODULE_3__.throwError)(_this4.handleError(error));
             }), (0, rxjs_operators__WEBPACK_IMPORTED_MODULE_4__.tap)(function (res) {
-              return _this4.handleAuthentication(res);
+              return _this4.handleAuthenticationSignIn(res);
             }));
           }
         }, {
           key: "handleAuthentication",
           value: function handleAuthentication(res) {
             var expirationDate = new Date(new Date().getTime() + +res.expiresIn * 1000);
-            var user = new _user_model__WEBPACK_IMPORTED_MODULE_0__.User(res.email, res.localId, res.idToken, expirationDate);
+            var user = new _user_model__WEBPACK_IMPORTED_MODULE_0__.User(res.email, res.localId, res.idToken, expirationDate, res.refreshToken);
             this.user.next(user);
             this.autoLogout(+res.expiresIn * 1000); //convert to ms for setinterval
 
             localStorage.setItem('userData', JSON.stringify(user));
+          }
+        }, {
+          key: "handleAuthenticationSignIn",
+          value: function handleAuthenticationSignIn(res) {
+            console.log("In handleAuthenticationSignIn()"); // TODO Dev Purpose
+            // const expirationDate = new Date(new Date().getTime() + 60*1000);
+
+            var expirationDate = new Date(new Date().getTime() + +res.expiresIn * 1000);
+            var user = new _user_model__WEBPACK_IMPORTED_MODULE_0__.User(res.email, res.localId, res.idToken, expirationDate, res.refreshToken);
+            this.user.next(user); // TODO Dev Purpose
+            // this.autoRenew(60 * 1000); //convert to ms for setinterval
+
+            this.autoRenew(+res.expiresIn * 1000); //convert to ms for setinterval 
+
+            localStorage.setItem('userData', JSON.stringify(user));
+            this.expirationDate = expirationDate;
+          }
+        }, {
+          key: "handleAuthenticationAutoRefresh",
+          value: function handleAuthenticationAutoRefresh(res) {
+            console.log("In handleAuthenticationAutoRefresh()");
+            console.log("Clearing the interval ");
+            console.log("res.expiresIn", +res.expiresIn);
+            this.clearGivenInterval(this.autoRenewInterval);
+            var userObj = JSON.parse(localStorage.getItem('userData')); // console.log(`res`, res)
+            // console.log(`userObj`, userObj)
+            // TODO Dev Purpose
+            // const expirationDate = new Date(new Date().getTime() + 60 * 1000);
+
+            var expirationDate = new Date(new Date().getTime() + +res.expiresIn * 1000);
+            var user = new _user_model__WEBPACK_IMPORTED_MODULE_0__.User(userObj.email, userObj.id, res.id_token, expirationDate, res.refresh_token);
+            this.user.next(user);
+            localStorage.setItem('userData', JSON.stringify(user)); // TODO Dev Purpose
+            // this.autoRenew(60 * 1000); //convert to ms for setinterval
+
+            this.autoRenew(+res.expiresIn * 1000); //convert to ms for setinterval 
+
+            this.expirationDate = expirationDate;
           }
         }, {
           key: "handleError",
@@ -1194,13 +1233,15 @@
         }, {
           key: "autoLogin",
           value: function autoLogin() {
+            console.log("autologin");
             var userData = localStorage.getItem('userData');
 
             if (userData) {
               var user = JSON.parse(userData);
-              var loadedUser = new _user_model__WEBPACK_IMPORTED_MODULE_0__.User(user.email, user.id, user._token, new Date(user._tokenExpirationDate));
-              this.user.next(loadedUser);
-              this.autoLogout(new Date(user._tokenExpirationDate).getTime() - new Date().getTime()); //convert to ms for setinterval
+              var loadedUser = new _user_model__WEBPACK_IMPORTED_MODULE_0__.User(user.email, user.id, user._token, new Date(user._tokenExpirationDate), user._refreshToken);
+              this.user.next(loadedUser); // this.autoLogout(new Date(user._tokenExpirationDate).getTime() - new Date().getTime()); //convert to ms for setinterval
+
+              this.autoRenew(loadedUser.tokenExpirationDate.getTime() - new Date().getTime()); //convert to ms for setinterval
             }
           }
         }, {
@@ -1209,12 +1250,17 @@
             this.user.next(null);
             this.router.navigate(["/auth"]);
             localStorage.removeItem('userData');
-
-            if (this.logoutInterval) {
-              clearInterval(this.logoutInterval);
+            this.clearGivenInterval(this.logoutInterval);
+            this.clearGivenInterval(this.autoRenewInterval);
+          }
+        }, {
+          key: "clearGivenInterval",
+          value: function clearGivenInterval(interval) {
+            if (interval) {
+              clearInterval(interval);
             }
 
-            this.logoutInterval = null;
+            interval = null;
           }
         }, {
           key: "autoLogout",
@@ -1226,12 +1272,51 @@
             }, expiration);
           }
         }, {
+          key: "autoRenew",
+          value: function autoRenew(expiration) {
+            var _this6 = this;
+
+            if (expiration > 0) {
+              console.log("In autorenew() method");
+              this.autoRenewInterval = setInterval(function () {
+                console.log("calling refreshtoken()");
+
+                _this6.refreshToken();
+              }, expiration);
+            }
+          }
+        }, {
           key: "getUserEmail",
           value: function getUserEmail() {
             return this.user.pipe((0, rxjs_operators__WEBPACK_IMPORTED_MODULE_5__.take)(1), (0, rxjs_operators__WEBPACK_IMPORTED_MODULE_6__.exhaustMap)(function (user) {
               //console.log("AuthService:" + user.email)
               return user.email;
             }));
+          }
+        }, {
+          key: "refreshToken",
+          value: function refreshToken() {
+            var _this7 = this;
+
+            console.log("In refreshToken() method");
+            var userData = localStorage.getItem('userData');
+
+            if (userData) {
+              console.log("user data in sessinstoage found");
+              var user = JSON.parse(userData);
+              return this.http.post(this.refreshTokenUrl, {
+                grant_type: "refresh_token",
+                refresh_token: user._refreshToken
+              }).pipe((0, rxjs_operators__WEBPACK_IMPORTED_MODULE_2__.catchError)(function (error) {
+                return (0, rxjs__WEBPACK_IMPORTED_MODULE_3__.throwError)(_this7.handleError(error));
+              }), (0, rxjs_operators__WEBPACK_IMPORTED_MODULE_4__.tap)(function (res) {
+                return _this7.handleAuthenticationAutoRefresh(res);
+              })).subscribe(function (data) {
+                console.log("Auto refresh succesful", data);
+              }, function (err) {
+                console.log("Auto refresh failed", err);
+              });
+            }
           }
         }]);
 
@@ -1271,23 +1356,33 @@
       });
 
       var _User = /*#__PURE__*/function () {
-        function _User(email, id, _token, _tokenExpirationDate) {
+        function _User(email, id, _token, _tokenExpirationDate, _refreshToken) {
           _classCallCheck(this, _User);
 
           this.email = email;
           this.id = id;
           this._token = _token;
           this._tokenExpirationDate = _tokenExpirationDate;
+          this._refreshToken = _refreshToken;
         }
 
         _createClass(_User, [{
           key: "token",
           get: function get() {
-            if (!this._tokenExpirationDate || new Date() > this._tokenExpirationDate) {
+            if (!this._tokenExpirationDate) {
               return null;
             }
 
             return this._token;
+          }
+        }, {
+          key: "tokenExpirationDate",
+          get: function get() {
+            if (!this._tokenExpirationDate) {
+              return null;
+            }
+
+            return this._tokenExpirationDate;
           }
         }]);
 
@@ -1399,7 +1494,7 @@
         }, {
           key: "onSubmit",
           value: function onSubmit(form) {
-            var _this6 = this;
+            var _this8 = this;
 
             console.log(form.value);
             this.loading = true;
@@ -1413,18 +1508,18 @@
               comments: [new Comment()]
             }).subscribe(function (res) {
               console.log(res);
-              _this6.loading = false;
+              _this8.loading = false;
 
-              _this6.sharedService.blogAddedSubject.next(true);
+              _this8.sharedService.blogAddedSubject.next(true);
 
-              _this6.sharedService.openSnackBar("Blog Saved successfully", "Yay");
+              _this8.sharedService.openSnackBar("Blog Saved successfully", "Yay");
 
               form.reset();
             }, function (err) {
               console.log(err);
-              _this6.loading = false;
+              _this8.loading = false;
 
-              _this6.sharedService.openSnackBar("Blog Saved failed", "Naa");
+              _this8.sharedService.openSnackBar("Blog Saved failed", "Naa");
             });
           }
         }, {
@@ -1667,14 +1762,14 @@
         }, {
           key: "ngOnInit",
           value: function ngOnInit() {
-            var _this7 = this;
+            var _this9 = this;
 
             this.sharedService.tabChangeIndex.subscribe(function (index) {
-              _this7.selectedIndex = index;
+              _this9.selectedIndex = index;
             });
             this.sharedService.blogAddedSubject.subscribe(function (val) {
               console.log("Blog: Received " + val);
-              _this7.blogUpdated = true;
+              _this9.blogUpdated = true;
             });
           }
         }, {
@@ -1841,32 +1936,32 @@
         _createClass(_EditBlogComponent, [{
           key: "ngOnInit",
           value: function ngOnInit() {
-            var _this8 = this;
+            var _this10 = this;
 
             console.log("EditBlog->NgOnInit->" + this.heading);
             this.dataservice.blogSubject.subscribe(function (item) {
               //console.log("Received:--------"+ new Date())
               //console.log( item.value.blogtext);
-              _this8.blogtext = item.value.blogtext;
-              _this8.heading = item.value.heading;
-              _this8.tags = item.value.tags;
-              _this8.category = item.value.category;
-              _this8.key = item.key; //setTimeout(this.handleRefresh,2000);
+              _this10.blogtext = item.value.blogtext;
+              _this10.heading = item.value.heading;
+              _this10.tags = item.value.tags;
+              _this10.category = item.value.category;
+              _this10.key = item.key; //setTimeout(this.handleRefresh,2000);
             });
           }
         }, {
           key: "handleRefresh",
           value: function handleRefresh(event) {
-            var _this9 = this;
+            var _this11 = this;
 
             console.log("called refresh" + this.blogtext);
             Array.from(this.peditor.el.nativeElement.children) // .filter( (c: HTMLElement) => c.className.includes('ql-blank'))
             .forEach(function (c) {
               console.log(c.children[1].children[0]);
 
-              if (_this9.blogtext) {
-                console.log("Why the text is null " + _this9.blogtext);
-                c.children[1].children[0].innerHTML = _this9.blogtext;
+              if (_this11.blogtext) {
+                console.log("Why the text is null " + _this11.blogtext);
+                c.children[1].children[0].innerHTML = _this11.blogtext;
               }
             });
           }
@@ -1906,7 +2001,7 @@
         }, {
           key: "onSubmit",
           value: function onSubmit(form) {
-            var _this10 = this;
+            var _this12 = this;
 
             console.log(form);
             this.dataservice.updateBlog(this.key, {
@@ -1919,9 +2014,9 @@
               comments: [new Comment()]
             }).subscribe(function (res) {
               //console.log(res)
-              _this10.sharedService.blogAddedSubject.next(true);
+              _this12.sharedService.blogAddedSubject.next(true);
 
-              _this10.sharedService.openSnackBar('Post updated successfully', 'Yayyy');
+              _this12.sharedService.openSnackBar('Post updated successfully', 'Yayyy');
             }, function (err) {
               console.log(err);
             });
@@ -2668,7 +2763,7 @@
         }, {
           key: "ngOnInit",
           value: function ngOnInit() {
-            var _this11 = this;
+            var _this13 = this;
 
             console.log("View Blog: Init" + this.currentPage);
             this.fetchData(true); // this.sharedService.blogAddedSubject.subscribe(val => {
@@ -2680,15 +2775,15 @@
             this.sharedService.blogReloadSubject.subscribe(function (val) {
               console.log("blog added/updated");
 
-              _this11.fetchData(false);
+              _this13.fetchData(false);
 
-              _this11.handleFirstPage();
+              _this13.handleFirstPage();
             });
           }
         }, {
           key: "fetchData",
           value: function fetchData(initialLoad, keyDeleted) {
-            var _this12 = this;
+            var _this14 = this;
 
             this.loading = true;
             this.blogs = [];
@@ -2704,36 +2799,36 @@
 
                 //console.log(key)
                 //console.log(res[key])
-                _this12.blogs.push({
+                _this14.blogs.push({
                   key: key,
                   value: res[key]
                 });
 
-                _this12.categories.add(res[key].category == "" ? 'NA' : res[key].category);
+                _this14.categories.add(res[key].category == "" ? 'NA' : res[key].category);
 
                 if (res[key].tags) {
                   res[key].tags.split(" ").forEach(function (element) {
                     if (element == "") {
                       //console.log("NA")
-                      if (_this12.tags.get("NA")) _this12.tags.set("NA", _this12.tags.get("NA") + 1);else _this12.tags.set("NA", 1);
-                    } else if (_this12.tags.has(element)) _this12.tags.set(element, _this12.tags.get(element) + 1);else {
-                      _this12.tags.set(element, 1);
+                      if (_this14.tags.get("NA")) _this14.tags.set("NA", _this14.tags.get("NA") + 1);else _this14.tags.set("NA", 1);
+                    } else if (_this14.tags.has(element)) _this14.tags.set(element, _this14.tags.get(element) + 1);else {
+                      _this14.tags.set(element, 1);
                     }
                   });
                 }
               } //console.log(this.tags.values)
 
 
-              var _iterator = _createForOfIteratorHelper(_this12.tags.keys()),
+              var _iterator = _createForOfIteratorHelper(_this14.tags.keys()),
                   _step;
 
               try {
                 for (_iterator.s(); !(_step = _iterator.n()).done;) {
                   var tag = _step.value;
 
-                  _this12.tagsArr.push(tag + " : " + _this12.tags.get(tag));
+                  _this14.tagsArr.push(tag + " : " + _this14.tags.get(tag));
 
-                  _this12.tagsOptions.push(tag);
+                  _this14.tagsOptions.push(tag);
                 }
               } catch (err) {
                 _iterator.e(err);
@@ -2741,21 +2836,21 @@
                 _iterator.f();
               }
 
-              _this12.filteredTagsOptions = _this12.tagsControl.valueChanges.pipe((0, rxjs_operators__WEBPACK_IMPORTED_MODULE_6__.startWith)(''), (0, rxjs_operators__WEBPACK_IMPORTED_MODULE_7__.map)(function (value) {
-                return _this12._filter(value);
+              _this14.filteredTagsOptions = _this14.tagsControl.valueChanges.pipe((0, rxjs_operators__WEBPACK_IMPORTED_MODULE_6__.startWith)(''), (0, rxjs_operators__WEBPACK_IMPORTED_MODULE_7__.map)(function (value) {
+                return _this14._filter(value);
               })); // this.handleFirstPage();
               // this.blogsFiltered = this.blogs;
               //this.blogsPager = this.blogs;
 
-              if (initialLoad) _this12.handleNext(null); //this.handleNextV2();
+              if (initialLoad) _this14.handleNext(null); //this.handleNextV2();
 
-              _this12.loading = false; // for(let obj of Object.values(res)){
+              _this14.loading = false; // for(let obj of Object.values(res)){
               //       console.log(obj)
               //       this.blogs.push(obj);
               // }
             }, function (err) {
               console.log(err);
-              _this12.loading = false;
+              _this14.loading = false;
             });
           }
         }, {
@@ -2956,7 +3051,7 @@
         }, {
           key: "handleSearch",
           value: function handleSearch(event) {
-            var _this13 = this;
+            var _this15 = this;
 
             this.hidePageNos();
             this.searchInputFilter = this.searchInput.toLowerCase();
@@ -2966,12 +3061,12 @@
 
             if (this.searchInputFilter !== undefined && this.searchInputFilter !== ' ') {
               this.blogsFiltered = this.blogs.filter(function (x) {
-                return (x.value.heading.toLowerCase().includes(_this13.searchInputFilter) || _this13.tagsFormControl.value != "" && x.value.tags.includes(_this13.tagsFormControl.value)) && (x.value.category == _this13.selected || _this13.selected == 'All' || _this13.selected == 'NA' && x.value.category == '');
+                return (x.value.heading.toLowerCase().includes(_this15.searchInputFilter) || _this15.tagsFormControl.value != "" && x.value.tags.includes(_this15.tagsFormControl.value)) && (x.value.category == _this15.selected || _this15.selected == 'All' || _this15.selected == 'NA' && x.value.category == '');
               }); //this.blogsPager = this.blogsFiltered
             } else {
               console.log("Else case");
               this.blogsFiltered = this.blogs.filter(function (x) {
-                return x.value.category == _this13.selected || _this13.selected == 'All' || _this13.selected == 'NA' && x.value.category == '';
+                return x.value.category == _this15.selected || _this15.selected == 'All' || _this15.selected == 'NA' && x.value.category == '';
               });
             }
 
@@ -3008,7 +3103,7 @@
         }, {
           key: "handleTagChange",
           value: function handleTagChange(event) {
-            var _this14 = this;
+            var _this16 = this;
 
             //console.log(event);
             var searchArr = this.tagsFormControl.value ? this.tagsFormControl.value.map(function (x) {
@@ -3039,7 +3134,7 @@
               }); //this.blogsPager = this.blogsFiltered
             } else {
               this.blogsFiltered = this.blogs.filter(function (x) {
-                return x.value.tags.includes(_this14.tagsFormControl.value);
+                return x.value.tags.includes(_this16.tagsFormControl.value);
               });
             }
 
@@ -3072,23 +3167,23 @@
         }, {
           key: "onDeletePost",
           value: function onDeletePost(event, post) {
-            var _this15 = this;
+            var _this17 = this;
 
             this.dataService.deletePost(post.key).subscribe(function (msg) {
               //console.log(msg)
-              _this15.sharedService.openSnackBar('Post Deleted Successfully', 'Tadaaa');
+              _this17.sharedService.openSnackBar('Post Deleted Successfully', 'Tadaaa');
 
-              _this15.fetchData(false, post.key);
+              _this17.fetchData(false, post.key);
             }, function (err) {
               console.log(err);
 
-              _this15.sharedService.openSnackBar('Post Delete failed', 'Ding...');
+              _this17.sharedService.openSnackBar('Post Delete failed', 'Ding...');
             });
           }
         }, {
           key: "openDialog",
           value: function openDialog(event, blog) {
-            var _this16 = this;
+            var _this18 = this;
 
             var dialogRef = this.dialog.open(_dialogs_confirm_dialog_confirm_dialog_component__WEBPACK_IMPORTED_MODULE_0__.ConfirmDialogComponent, {
               width: '250px',
@@ -3101,7 +3196,7 @@
               console.log('The dialog was closed' + result);
 
               if (result == true) {
-                _this16.onDeletePost(event, blog);
+                _this18.onDeletePost(event, blog);
               }
             });
           }
@@ -3872,20 +3967,20 @@
         _createClass(_ViewSingleComponent, [{
           key: "ngOnInit",
           value: function ngOnInit() {
-            var _this17 = this;
+            var _this19 = this;
 
             this.dataservice.blogSubject.subscribe(function (item) {
               //console.log("Received:--------"+ new Date())
               //console.log( item.value.blogtext);
-              _this17.currentBlogItem = item;
+              _this19.currentBlogItem = item;
 
-              _this17.loadPostAndComments(item);
+              _this19.loadPostAndComments(item);
             });
           }
         }, {
           key: "loadPostAndComments",
           value: function loadPostAndComments(item) {
-            var _this18 = this;
+            var _this20 = this;
 
             this.blogtext = item.value.blogtext;
             this.heading = item.value.heading;
@@ -3900,7 +3995,7 @@
                 for (var _i2 = 0, _Object$keys2 = Object.keys(res); _i2 < _Object$keys2.length; _i2++) {
                   var key = _Object$keys2[_i2];
 
-                  _this18.comments.push({
+                  _this20.comments.push({
                     key: key,
                     value: res[key]
                   });
@@ -3913,14 +4008,14 @@
         }, {
           key: "onSubmit",
           value: function onSubmit(form) {
-            var _this19 = this;
+            var _this21 = this;
 
             //console.log(form.value);
             this.dataservice.addComment(this.key, new _model_comment_model__WEBPACK_IMPORTED_MODULE_0__.BlogComment(form.value.commentheading, form.value.commenttext)).subscribe(function (res) {
               //console.log(res)
-              _this19.sharedService.openSnackBar('New Comment saved successfully', 'Yayyy');
+              _this21.sharedService.openSnackBar('New Comment saved successfully', 'Yayyy');
 
-              _this19.loadPostAndComments(_this19.currentBlogItem);
+              _this21.loadPostAndComments(_this21.currentBlogItem);
 
               form.reset();
             }, function (err) {
@@ -3930,10 +4025,10 @@
         }, {
           key: "updateComment",
           value: function updateComment($event, comment) {
-            var _this20 = this;
+            var _this22 = this;
 
             this.dataservice.updateComment(this.key, comment.key, comment.value).subscribe(function (res) {
-              _this20.sharedService.openSnackBar('Comment updated successfully', 'Yayyy');
+              _this22.sharedService.openSnackBar('Comment updated successfully', 'Yayyy');
             }, function (err) {
               console.log(err);
             });
@@ -3941,14 +4036,14 @@
         }, {
           key: "deleteComment",
           value: function deleteComment($event, comment) {
-            var _this21 = this;
+            var _this23 = this;
 
             this.dataservice.deleteComment(this.key, comment.key).subscribe(function (res) {
               console.log(res);
 
-              _this21.sharedService.openSnackBar('Comment Deleted successfully', 'Yayyy');
+              _this23.sharedService.openSnackBar('Comment Deleted successfully', 'Yayyy');
 
-              _this21.loadPostAndComments(_this21.currentBlogItem);
+              _this23.loadPostAndComments(_this23.currentBlogItem);
             }, function (err) {
               console.log(err);
             });
@@ -3956,7 +4051,7 @@
         }, {
           key: "openDialog",
           value: function openDialog(event, comment) {
-            var _this22 = this;
+            var _this24 = this;
 
             var dialogRef = this.dialog.open(_dialogs_confirm_dialog_confirm_dialog_component__WEBPACK_IMPORTED_MODULE_1__.ConfirmDialogComponent, {
               width: '250px',
@@ -3969,7 +4064,7 @@
               console.log('The dialog was closed' + result);
 
               if (result == true) {
-                _this22.deleteComment(event, comment);
+                _this24.deleteComment(event, comment);
               }
             });
           }
@@ -4464,7 +4559,7 @@
         }, {
           key: "openDialog",
           value: function openDialog(event, id) {
-            var _this23 = this;
+            var _this25 = this;
 
             var dialogRef = this.dialog.open(src_app_dialogs_confirm_dialog_confirm_dialog_component__WEBPACK_IMPORTED_MODULE_0__.ConfirmDialogComponent, {
               width: '250px',
@@ -4477,21 +4572,21 @@
               console.log('The dialog was closed' + result);
 
               if (result == true) {
-                _this23.onDeletePost();
+                _this25.onDeletePost();
               }
             });
           }
         }, {
           key: "onDeletePost",
           value: function onDeletePost() {
-            var _this24 = this;
+            var _this26 = this;
 
             this.dataService.deletePost(this.blog.id).subscribe(function (msg) {
-              _this24.sharedService.openSnackBar('Post Deleted Successfully', 'Tadaaa');
+              _this26.sharedService.openSnackBar('Post Deleted Successfully', 'Tadaaa');
             }, function (err) {
               console.log(err);
 
-              _this24.sharedService.openSnackBar('Post Delete failed', 'Ding...');
+              _this26.sharedService.openSnackBar('Post Delete failed', 'Ding...');
             });
           }
         }, {
@@ -4626,6 +4721,15 @@
           key: "getBlogs",
           value: function getBlogs() {
             return this.http.get("https://masha-3f6b0.firebaseio.com/posts/".concat(this.getUserEmail(), ".json"));
+          }
+        }, {
+          key: "getBlogsRecent",
+          value: function getBlogsRecent(blogLimit) {
+            // https://masha-3f6b0.firebaseio.com/posts/lokeshinspire-gmail-com.json?auth=<token>&orderBy="datecreated"&equalTo="2021-09-30T19:08:19.161Z"&=
+            //https://firebase.google.com/docs/database/rest/retrieve-data
+            var date = new Date();
+            var weekbefore = date.setDate(date.getDate() - 7);
+            return this.http.get("https://masha-3f6b0.firebaseio.com/posts/".concat(this.getUserEmail(), ".json?&orderBy=\"datecreated\"&startAt=\"").concat(date.toISOString(), "\"&limitToLast=").concat(blogLimit));
           }
         }, {
           key: "updateBlog",
@@ -4977,11 +5081,11 @@
 
       function HeaderComponent_a_9_Template(rf, ctx) {
         if (rf & 1) {
-          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 14);
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 15);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtext"](1, "Home ");
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](2, "span", 15);
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](2, "span", 16);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtext"](3, "(current)");
 
@@ -4993,7 +5097,7 @@
 
       function HeaderComponent_a_11_Template(rf, ctx) {
         if (rf & 1) {
-          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 16);
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 17);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtext"](1, "Regular View");
 
@@ -5003,7 +5107,7 @@
 
       function HeaderComponent_a_13_Template(rf, ctx) {
         if (rf & 1) {
-          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 17);
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 18);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtext"](1, "Authentication");
 
@@ -5013,7 +5117,7 @@
 
       function HeaderComponent_a_15_Template(rf, ctx) {
         if (rf & 1) {
-          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 18);
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 19);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtext"](1, "Timeline View");
 
@@ -5023,7 +5127,7 @@
 
       function HeaderComponent_a_17_Template(rf, ctx) {
         if (rf & 1) {
-          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 19);
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 20);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtext"](1, "Scroll View");
 
@@ -5033,21 +5137,43 @@
 
       function HeaderComponent_a_20_Template(rf, ctx) {
         if (rf & 1) {
-          var _r7 = _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵgetCurrentView"]();
+          var _r8 = _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵgetCurrentView"]();
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 20);
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "a", 21);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵlistener"]("click", function HeaderComponent_a_20_Template_a_click_0_listener() {
-            _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵrestoreView"](_r7);
+            _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵrestoreView"](_r8);
 
-            var ctx_r6 = _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵnextContext"]();
+            var ctx_r7 = _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵnextContext"]();
 
-            return ctx_r6.onLogout();
+            return ctx_r7.onLogout();
           });
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtext"](1, "Logout");
 
           _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementEnd"]();
+        }
+      }
+
+      function HeaderComponent_div_21_Template(rf, ctx) {
+        if (rf & 1) {
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "div", 22);
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](1, "p");
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtext"](2);
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementEnd"]();
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementEnd"]();
+        }
+
+        if (rf & 2) {
+          var ctx_r6 = _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵnextContext"]();
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵadvance"](2);
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtextInterpolate1"]("Session Timeout in Min: ", ctx_r6.expiry, " ");
         }
       }
 
@@ -5064,16 +5190,18 @@
           this.authService = authService;
           this.authenticated = false;
           this.toggleMenu = true;
+          this.expiry = 0;
         }
 
         _createClass(_HeaderComponent, [{
           key: "ngOnInit",
           value: function ngOnInit() {
-            var _this25 = this;
+            var _this27 = this;
 
             this.userSubscription = this.authService.user.subscribe(function (user) {
-              _this25.authenticated = !!user;
+              _this27.authenticated = !!user;
             });
+            setInterval(this.timeRemaining.bind(this), 1000);
           }
         }, {
           key: "onLogout",
@@ -5091,6 +5219,17 @@
             console.log("toggleMenu", this.toggleMenu);
             this.toggleMenu = !this.toggleMenu;
           }
+        }, {
+          key: "timeRemaining",
+          value: function timeRemaining() {
+            if (localStorage.getItem("userData")) {
+              var expirationDate = new Date(JSON.parse(localStorage.getItem("userData"))._tokenExpirationDate);
+              var currentDate = new Date(); // console.log('currentDate',expirationDate)
+              // console.log('expirationDate',expirationDate)
+
+              this.expiry = parseFloat(((expirationDate.getTime() - currentDate.getTime()) / 60000).toFixed(2));
+            }
+          }
         }]);
 
         return _HeaderComponent;
@@ -5103,9 +5242,9 @@
       _HeaderComponent.ɵcmp = /*@__PURE__*/_angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵdefineComponent"]({
         type: _HeaderComponent,
         selectors: [["app-header"]],
-        decls: 21,
-        vars: 9,
-        consts: [[1, "navbar", "navbar-expand-lg", "justify-content-between"], ["href", "#", "routerLink", "/home", 1, "navbar-brand", "customcolordark"], ["mat-mini-fab", "", "color", "accent", 1, "toggleMenu", 3, "click"], ["id", "navbarNav", 1, "row", 3, "ngClass"], [1, "navbar-nav"], [1, "nav-item", "active"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/home", 4, "ngIf"], [1, "nav-item"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/blogs", 4, "ngIf"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/auth", 4, "ngIf"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/timelineview", 4, "ngIf"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/timelineview3", 4, "ngIf"], [1, "nav", "navbar-nav", "ml-auto"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/Logout", 3, "click", 4, "ngIf"], ["href", "#", "routerLink", "/home", 1, "nav-link", "customcolordark"], [1, "sr-only"], ["href", "#", "routerLink", "/blogs", 1, "nav-link", "customcolordark"], ["href", "#", "routerLink", "/auth", 1, "nav-link", "customcolordark"], ["href", "#", "routerLink", "/timelineview", 1, "nav-link", "customcolordark"], ["href", "#", "routerLink", "/timelineview3", 1, "nav-link", "customcolordark"], ["href", "#", "routerLink", "/Logout", 1, "nav-link", "customcolordark", 3, "click"]],
+        decls: 22,
+        vars: 10,
+        consts: [[1, "navbar", "navbar-expand-lg", "justify-content-between"], ["href", "#", "routerLink", "/home", 1, "navbar-brand", "customcolordark"], ["mat-mini-fab", "", "color", "accent", 1, "toggleMenu", 3, "click"], ["id", "navbarNav", 1, "row", 3, "ngClass"], [1, "navbar-nav"], [1, "nav-item", "active"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/home", 4, "ngIf"], [1, "nav-item"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/blogs", 4, "ngIf"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/auth", 4, "ngIf"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/timelineview", 4, "ngIf"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/timelineview3", 4, "ngIf"], [1, "nav", "navbar-nav", "ml-auto"], ["class", "nav-link customcolordark", "href", "#", "routerLink", "/Logout", 3, "click", 4, "ngIf"], ["class", "session-expiry", 4, "ngIf"], ["href", "#", "routerLink", "/home", 1, "nav-link", "customcolordark"], [1, "sr-only"], ["href", "#", "routerLink", "/blogs", 1, "nav-link", "customcolordark"], ["href", "#", "routerLink", "/auth", 1, "nav-link", "customcolordark"], ["href", "#", "routerLink", "/timelineview", 1, "nav-link", "customcolordark"], ["href", "#", "routerLink", "/timelineview3", 1, "nav-link", "customcolordark"], ["href", "#", "routerLink", "/Logout", 1, "nav-link", "customcolordark", 3, "click"], [1, "session-expiry"]],
         template: function HeaderComponent_Template(rf, ctx) {
           if (rf & 1) {
             _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementStart"](0, "nav", 0);
@@ -5179,12 +5318,14 @@
             _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementEnd"]();
 
             _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵelementEnd"]();
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵtemplate"](21, HeaderComponent_div_21_Template, 3, 1, "div", 14);
           }
 
           if (rf & 2) {
             _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵadvance"](6);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵproperty"]("ngClass", _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵpureFunction1"](7, _c0, ctx.toggleMenu));
+            _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵproperty"]("ngClass", _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵpureFunction1"](8, _c0, ctx.toggleMenu));
 
             _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵadvance"](3);
 
@@ -5209,10 +5350,14 @@
             _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵadvance"](3);
 
             _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵproperty"]("ngIf", ctx.authenticated);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵadvance"](1);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_1__["ɵɵproperty"]("ngIf", ctx.authenticated);
           }
         },
         directives: [_angular_router__WEBPACK_IMPORTED_MODULE_2__.RouterLinkWithHref, _angular_material_button__WEBPACK_IMPORTED_MODULE_3__.MatButton, _angular_material_icon__WEBPACK_IMPORTED_MODULE_4__.MatIcon, _angular_common__WEBPACK_IMPORTED_MODULE_5__.NgClass, _angular_common__WEBPACK_IMPORTED_MODULE_5__.NgIf],
-        styles: [".navbar[_ngcontent-%COMP%]{\n    border-bottom: 2px solid #ffc6f0;\n    position: fixed;\n    top: 0px;\n    left: 0px;\n    width: 100%;\n    background-color: #fff3fc;\n    z-index:1; \n}\n.hideme[_ngcontent-%COMP%]{\n   display: flex;\n}\n.toggleMenu[_ngcontent-%COMP%]{\n    display: none;\n}\n@media( max-width: 414px) {\n    .navbar[_ngcontent-%COMP%] {\n        display:flex;\n        flex-direction: column;\n        align-items:flex-start;\n        padding-left: 40px;\n        position: relative;\n    }\n\n    #navbarNav[_ngcontent-%COMP%] {\n        flex-direction: column;\n    }\n\n    .hideme[_ngcontent-%COMP%]{\n        display: none;\n\n    }\n\n\n    .toggleMenu[_ngcontent-%COMP%]{\n        display: block;\n    }\n\n    .row[_ngcontent-%COMP%] {\n        margin: 0;\n    }\n    .navbar-nav[_ngcontent-%COMP%]{\n                margin: 0;\n\n    }\n    .timeline-margin[_ngcontent-%COMP%]{\n        margin-top: 10px;\n    }\n    .ml-auto[_ngcontent-%COMP%]{\n        margin-left: 0 !important;\n    }\n}\n/*# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbImhlYWRlci5jb21wb25lbnQuY3NzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiJBQUFBO0lBQ0ksZ0NBQWdDO0lBQ2hDLGVBQWU7SUFDZixRQUFRO0lBQ1IsU0FBUztJQUNULFdBQVc7SUFDWCx5QkFBeUI7SUFDekIsU0FBUztBQUNiO0FBQ0E7R0FDRyxhQUFhO0FBQ2hCO0FBRUE7SUFDSSxhQUFhO0FBQ2pCO0FBR0E7SUFDSTtRQUNJLFlBQVk7UUFDWixzQkFBc0I7UUFDdEIsc0JBQXNCO1FBQ3RCLGtCQUFrQjtRQUNsQixrQkFBa0I7SUFDdEI7O0lBRUE7UUFDSSxzQkFBc0I7SUFDMUI7O0lBRUE7UUFDSSxhQUFhOztJQUVqQjs7O0lBR0E7UUFDSSxjQUFjO0lBQ2xCOztJQUVBO1FBQ0ksU0FBUztJQUNiO0lBQ0E7Z0JBQ1ksU0FBUzs7SUFFckI7SUFDQTtRQUNJLGdCQUFnQjtJQUNwQjtJQUNBO1FBQ0kseUJBQXlCO0lBQzdCO0FBQ0oiLCJmaWxlIjoiaGVhZGVyLmNvbXBvbmVudC5jc3MiLCJzb3VyY2VzQ29udGVudCI6WyIubmF2YmFye1xuICAgIGJvcmRlci1ib3R0b206IDJweCBzb2xpZCAjZmZjNmYwO1xuICAgIHBvc2l0aW9uOiBmaXhlZDtcbiAgICB0b3A6IDBweDtcbiAgICBsZWZ0OiAwcHg7XG4gICAgd2lkdGg6IDEwMCU7XG4gICAgYmFja2dyb3VuZC1jb2xvcjogI2ZmZjNmYztcbiAgICB6LWluZGV4OjE7IFxufVxuLmhpZGVtZXtcbiAgIGRpc3BsYXk6IGZsZXg7XG59XG5cbi50b2dnbGVNZW51e1xuICAgIGRpc3BsYXk6IG5vbmU7XG59XG5cblxuQG1lZGlhKCBtYXgtd2lkdGg6IDQxNHB4KSB7XG4gICAgLm5hdmJhciB7XG4gICAgICAgIGRpc3BsYXk6ZmxleDtcbiAgICAgICAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgICAgICAgYWxpZ24taXRlbXM6ZmxleC1zdGFydDtcbiAgICAgICAgcGFkZGluZy1sZWZ0OiA0MHB4O1xuICAgICAgICBwb3NpdGlvbjogcmVsYXRpdmU7XG4gICAgfVxuXG4gICAgI25hdmJhck5hdiB7XG4gICAgICAgIGZsZXgtZGlyZWN0aW9uOiBjb2x1bW47XG4gICAgfVxuXG4gICAgLmhpZGVtZXtcbiAgICAgICAgZGlzcGxheTogbm9uZTtcblxuICAgIH1cblxuXG4gICAgLnRvZ2dsZU1lbnV7XG4gICAgICAgIGRpc3BsYXk6IGJsb2NrO1xuICAgIH1cblxuICAgIC5yb3cge1xuICAgICAgICBtYXJnaW46IDA7XG4gICAgfVxuICAgIC5uYXZiYXItbmF2e1xuICAgICAgICAgICAgICAgIG1hcmdpbjogMDtcblxuICAgIH1cbiAgICAudGltZWxpbmUtbWFyZ2lue1xuICAgICAgICBtYXJnaW4tdG9wOiAxMHB4O1xuICAgIH1cbiAgICAubWwtYXV0b3tcbiAgICAgICAgbWFyZ2luLWxlZnQ6IDAgIWltcG9ydGFudDtcbiAgICB9XG59Il19 */"]
+        styles: [".navbar[_ngcontent-%COMP%]{\n    border-bottom: 2px solid #ffc6f0;\n    position: fixed;\n    top: 0px;\n    left: 0px;\n    width: 100%;\n    background-color: #fff3fc;\n    z-index:1; \n}\n.hideme[_ngcontent-%COMP%]{\n   display: flex;\n}\n.toggleMenu[_ngcontent-%COMP%]{\n    display: none;\n}\n.session-expiry[_ngcontent-%COMP%]{\n    \n    display: block;\n    width: 190px;\n    align-items: flex-end;\n    position: absolute;\n    right: 1px;\n    top: 40px;\n    z-index: 2;\n    \n}\n.session-expiry[_ngcontent-%COMP%]   p[_ngcontent-%COMP%] {\n    padding: 0px;\n    font-size: small;\n    margin: 0px;\n    font-style: italic;\n}\n@media( max-width: 414px) {\n    .navbar[_ngcontent-%COMP%] {\n        display:flex;\n        flex-direction: column;\n        align-items:flex-start;\n        padding-left: 40px;\n        position: relative;\n    }\n\n    #navbarNav[_ngcontent-%COMP%] {\n        flex-direction: column;\n    }\n\n    .hideme[_ngcontent-%COMP%]{\n        display: none;\n\n    }\n\n\n    .toggleMenu[_ngcontent-%COMP%]{\n        display: block;\n    }\n\n    .row[_ngcontent-%COMP%] {\n        margin: 0;\n    }\n    .navbar-nav[_ngcontent-%COMP%]{\n                margin: 0;\n\n    }\n    .timeline-margin[_ngcontent-%COMP%]{\n        margin-top: 10px;\n    }\n    .ml-auto[_ngcontent-%COMP%]{\n        margin-left: 0 !important;\n    }\n    .session-expiry[_ngcontent-%COMP%]{\n      \n      \n        top: 75px;\n      \n    }\n}\n/*# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbImhlYWRlci5jb21wb25lbnQuY3NzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiJBQUFBO0lBQ0ksZ0NBQWdDO0lBQ2hDLGVBQWU7SUFDZixRQUFRO0lBQ1IsU0FBUztJQUNULFdBQVc7SUFDWCx5QkFBeUI7SUFDekIsU0FBUztBQUNiO0FBQ0E7R0FDRyxhQUFhO0FBQ2hCO0FBRUE7SUFDSSxhQUFhO0FBQ2pCO0FBRUE7SUFDSSxrQkFBa0I7SUFDbEIsY0FBYztJQUNkLFlBQVk7SUFDWixxQkFBcUI7SUFDckIsa0JBQWtCO0lBQ2xCLFVBQVU7SUFDVixTQUFTO0lBQ1QsVUFBVTtJQUNWLCtCQUErQjtBQUNuQztBQUNBO0lBQ0ksWUFBWTtJQUNaLGdCQUFnQjtJQUNoQixXQUFXO0lBQ1gsa0JBQWtCO0FBQ3RCO0FBR0E7SUFDSTtRQUNJLFlBQVk7UUFDWixzQkFBc0I7UUFDdEIsc0JBQXNCO1FBQ3RCLGtCQUFrQjtRQUNsQixrQkFBa0I7SUFDdEI7O0lBRUE7UUFDSSxzQkFBc0I7SUFDMUI7O0lBRUE7UUFDSSxhQUFhOztJQUVqQjs7O0lBR0E7UUFDSSxjQUFjO0lBQ2xCOztJQUVBO1FBQ0ksU0FBUztJQUNiO0lBQ0E7Z0JBQ1ksU0FBUzs7SUFFckI7SUFDQTtRQUNJLGdCQUFnQjtJQUNwQjtJQUNBO1FBQ0kseUJBQXlCO0lBQzdCO0lBQ0E7OztRQUdJLFNBQVM7O0lBRWI7QUFDSiIsImZpbGUiOiJoZWFkZXIuY29tcG9uZW50LmNzcyIsInNvdXJjZXNDb250ZW50IjpbIi5uYXZiYXJ7XG4gICAgYm9yZGVyLWJvdHRvbTogMnB4IHNvbGlkICNmZmM2ZjA7XG4gICAgcG9zaXRpb246IGZpeGVkO1xuICAgIHRvcDogMHB4O1xuICAgIGxlZnQ6IDBweDtcbiAgICB3aWR0aDogMTAwJTtcbiAgICBiYWNrZ3JvdW5kLWNvbG9yOiAjZmZmM2ZjO1xuICAgIHotaW5kZXg6MTsgXG59XG4uaGlkZW1le1xuICAgZGlzcGxheTogZmxleDtcbn1cblxuLnRvZ2dsZU1lbnV7XG4gICAgZGlzcGxheTogbm9uZTtcbn1cblxuLnNlc3Npb24tZXhwaXJ5e1xuICAgIC8qIGZsb2F0OiByaWdodDsgKi9cbiAgICBkaXNwbGF5OiBibG9jaztcbiAgICB3aWR0aDogMTkwcHg7XG4gICAgYWxpZ24taXRlbXM6IGZsZXgtZW5kO1xuICAgIHBvc2l0aW9uOiBhYnNvbHV0ZTtcbiAgICByaWdodDogMXB4O1xuICAgIHRvcDogNDBweDtcbiAgICB6LWluZGV4OiAyO1xuICAgIC8qIGJhY2tncm91bmQtY29sb3I6ICNmZmYzZmM7ICovXG59XG4uc2Vzc2lvbi1leHBpcnkgcCB7XG4gICAgcGFkZGluZzogMHB4O1xuICAgIGZvbnQtc2l6ZTogc21hbGw7XG4gICAgbWFyZ2luOiAwcHg7XG4gICAgZm9udC1zdHlsZTogaXRhbGljO1xufVxuXG5cbkBtZWRpYSggbWF4LXdpZHRoOiA0MTRweCkge1xuICAgIC5uYXZiYXIge1xuICAgICAgICBkaXNwbGF5OmZsZXg7XG4gICAgICAgIGZsZXgtZGlyZWN0aW9uOiBjb2x1bW47XG4gICAgICAgIGFsaWduLWl0ZW1zOmZsZXgtc3RhcnQ7XG4gICAgICAgIHBhZGRpbmctbGVmdDogNDBweDtcbiAgICAgICAgcG9zaXRpb246IHJlbGF0aXZlO1xuICAgIH1cblxuICAgICNuYXZiYXJOYXYge1xuICAgICAgICBmbGV4LWRpcmVjdGlvbjogY29sdW1uO1xuICAgIH1cblxuICAgIC5oaWRlbWV7XG4gICAgICAgIGRpc3BsYXk6IG5vbmU7XG5cbiAgICB9XG5cblxuICAgIC50b2dnbGVNZW51e1xuICAgICAgICBkaXNwbGF5OiBibG9jaztcbiAgICB9XG5cbiAgICAucm93IHtcbiAgICAgICAgbWFyZ2luOiAwO1xuICAgIH1cbiAgICAubmF2YmFyLW5hdntcbiAgICAgICAgICAgICAgICBtYXJnaW46IDA7XG5cbiAgICB9XG4gICAgLnRpbWVsaW5lLW1hcmdpbntcbiAgICAgICAgbWFyZ2luLXRvcDogMTBweDtcbiAgICB9XG4gICAgLm1sLWF1dG97XG4gICAgICAgIG1hcmdpbi1sZWZ0OiAwICFpbXBvcnRhbnQ7XG4gICAgfVxuICAgIC5zZXNzaW9uLWV4cGlyeXtcbiAgICAgIFxuICAgICAgXG4gICAgICAgIHRvcDogNzVweDtcbiAgICAgIFxuICAgIH1cbn0iXX0= */"]
       });
       /***/
     },
@@ -5245,6 +5390,12 @@
       /* harmony import */
 
 
+      var _angular_router__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(
+      /*! @angular/router */
+      71258);
+      /* harmony import */
+
+
       var _dao_data_service__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(
       /*! ../dao/data.service */
       62140);
@@ -5257,7 +5408,7 @@
       /* harmony import */
 
 
-      var _angular_common__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(
+      var _angular_common__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(
       /*! @angular/common */
       54364);
       /* harmony import */
@@ -5266,6 +5417,18 @@
       var _spinner_spinner_component__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(
       /*! ../spinner/spinner.component */
       64283);
+      /* harmony import */
+
+
+      var _angular_material_button__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(
+      /*! @angular/material/button */
+      70781);
+      /* harmony import */
+
+
+      var _angular_material_icon__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(
+      /*! @angular/material/icon */
+      52529);
 
       function HomeComponent_app_spinner_1_Template(rf, ctx) {
         if (rf & 1) {
@@ -5275,35 +5438,61 @@
 
       function HomeComponent_div_2_Template(rf, ctx) {
         if (rf & 1) {
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](0, "div", 3);
+          var _r3 = _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵgetCurrentView"]();
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](1, "div", 4);
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](0, "div");
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](2, "h4", 5);
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](1, "div", 2);
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](3);
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](2, "div");
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](3, "h4", 3);
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](4, "div", 6);
-
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](5, "div", 7);
-
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](6, "h4");
-
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](7);
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](4);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](8, "p");
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](5, "h4", 3);
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](6);
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](7, "div", 4);
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](8, "h4");
 
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](9);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](10, "p");
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](11);
+
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelement"](10, "div", 8);
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](12, "button", 5);
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("click", function HomeComponent_div_2_Template_button_click_12_listener() {
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵrestoreView"](_r3);
+
+            var ctx_r2 = _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵnextContext"]();
+
+            return ctx_r2.editBlog();
+          });
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](13, "mat-icon");
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](14, "edit_note");
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelement"](15, "div", 6);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
@@ -5315,11 +5504,15 @@
         if (rf & 2) {
           var ctx_r1 = _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵnextContext"]();
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](3);
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](4);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtextInterpolate1"]("Welcome ", ctx_r1.userEmail, "");
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](4);
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](2);
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtextInterpolate1"]("Blog changes lastweek:", ctx_r1.blogs.length, "");
+
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](3);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtextInterpolate"](ctx_r1.randomBlog.heading);
 
@@ -5327,16 +5520,17 @@
 
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtextInterpolate1"]("Tags: ", ctx_r1.randomBlog.tags, "");
 
-          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](1);
+          _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](4);
 
           _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵproperty"]("innerHTML", ctx_r1.randomBlog.blogtext, _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵsanitizeHtml"]);
         }
       }
 
       var _HomeComponent = /*#__PURE__*/function () {
-        function _HomeComponent(dataService, authService) {
+        function _HomeComponent(router, dataService, authService) {
           _classCallCheck(this, _HomeComponent);
 
+          this.router = router;
           this.dataService = dataService;
           this.authService = authService;
           this.loading = false;
@@ -5347,32 +5541,33 @@
         _createClass(_HomeComponent, [{
           key: "ngOnInit",
           value: function ngOnInit() {
-            var _this26 = this;
+            var _this28 = this;
 
             this.loading = true;
             this.authService.getUserEmail().subscribe(function (email) {
-              //console.log(email)
-              _this26.userEmail += email;
+              _this28.userEmail += email;
             });
-            this.dataService.getBlogs().subscribe(function (res) {
+            this.dataService.getBlogsRecent(2).subscribe(function (res) {
               for (var _i3 = 0, _Object$keys3 = Object.keys(res); _i3 < _Object$keys3.length; _i3++) {
                 var key = _Object$keys3[_i3];
 
-                //console.log(key)
-                //console.log(res[key])
-                _this26.blogs.push({
-                  key: key,
+                _this28.blogs.push({
+                  id: key,
                   value: res[key]
                 });
-              } //console.log(this.blogs[2])
+              }
 
+              if (_this28.blogs.length > 0) {
+                var randomInt = _this28.getRandomInt(_this28.blogs.length);
 
-              _this26.randomBlog = _this26.blogs[_this26.getRandomInt(_this26.blogs.length)].value; //console.log(this.randomBlog)   
+                _this28.randomBlog = _this28.blogs[randomInt].value;
+                _this28.randomId = _this28.blogs[randomInt].id;
+              }
 
-              _this26.loading = false;
+              _this28.loading = false;
             }, function (err) {
               console.log(err);
-              _this26.loading = false;
+              _this28.loading = false;
             });
           }
         }, {
@@ -5383,13 +5578,23 @@
           value: function getRandomInt(max) {
             return Math.floor(Math.random() * Math.floor(max));
           }
+        }, {
+          key: "editBlog",
+          value: function editBlog() {
+            this.router.navigate(['edit'], {
+              queryParams: {
+                blogId: this.randomId
+              },
+              queryParamsHandling: 'merge'
+            });
+          }
         }]);
 
         return _HomeComponent;
       }();
 
       _HomeComponent.ɵfac = function HomeComponent_Factory(t) {
-        return new (t || _HomeComponent)(_angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵdirectiveInject"](_dao_data_service__WEBPACK_IMPORTED_MODULE_0__.DataService), _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵdirectiveInject"](_auth_auth_service__WEBPACK_IMPORTED_MODULE_1__.AuthService));
+        return new (t || _HomeComponent)(_angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵdirectiveInject"](_angular_router__WEBPACK_IMPORTED_MODULE_4__.Router), _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵdirectiveInject"](_dao_data_service__WEBPACK_IMPORTED_MODULE_0__.DataService), _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵdirectiveInject"](_auth_auth_service__WEBPACK_IMPORTED_MODULE_1__.AuthService));
       };
 
       _HomeComponent.ɵcmp = /*@__PURE__*/_angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵdefineComponent"]({
@@ -5397,14 +5602,14 @@
         selectors: [["app-home"]],
         decls: 3,
         vars: 2,
-        consts: [[1, "container"], [4, "ngIf"], ["class", "row", 4, "ngIf"], [1, "row"], [1, "col-md-12"], [1, "heading"], [1, "slider-container"], [1, "formatcode"], [1, "formatcode", 3, "innerHTML"]],
+        consts: [[1, "home-container"], [4, "ngIf"], [1, "grid"], [1, "heading"], [1, "formatcode"], ["mat-mini-fab", "", "color", "accent", 3, "click"], [3, "innerHTML"]],
         template: function HomeComponent_Template(rf, ctx) {
           if (rf & 1) {
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](0, "div", 0);
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtemplate"](1, HomeComponent_app_spinner_1_Template, 1, 0, "app-spinner", 1);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtemplate"](2, HomeComponent_div_2_Template, 11, 4, "div", 2);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtemplate"](2, HomeComponent_div_2_Template, 16, 5, "div", 1);
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
           }
@@ -5419,8 +5624,8 @@
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵproperty"]("ngIf", !ctx.loading);
           }
         },
-        directives: [_angular_common__WEBPACK_IMPORTED_MODULE_4__.NgIf, _spinner_spinner_component__WEBPACK_IMPORTED_MODULE_2__.SpinnerComponent],
-        styles: [".container[_ngcontent-%COMP%] {\n    margin-top: 80px;\n    height: 85%;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    \n    box-shadow: rgba(6, 24, 44, 0.4) 0px 0px 0px 2px, rgba(6, 24, 44, 0.65) 0px 4px 6px -1px, rgba(255, 255, 255, 0.08) 0px 1px 0px inset;\n}\n\n.scrolling-container[_ngcontent-%COMP%]{\n    background-color: #EDF5E1;\n}\n\n.heading[_ngcontent-%COMP%]{\n    text-align: center;\n    color: #05386B ;\n}\n\n.slider-container[_ngcontent-%COMP%]{\n    margin-top: 20px;\n    \n    position: relative;\n    border: 1px solid #ffc6f0;\n}\n\n.formatcode[_ngcontent-%COMP%]{\n    word-wrap: break-word;\n    line-break: strict;\n    padding: 5px;\n    margin: 30px;\n}\n\n@media screen and ( max-width: 400px)  {\n    .container[_ngcontent-%COMP%] {\n        margin-top: 0px;\n        height: 85%;\n        display: block;\n        box-shadow: none;\n    }\n}\n/*# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbImhvbWUuY29tcG9uZW50LmNzcyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiQUFBQTtJQUNJLGdCQUFnQjtJQUNoQixXQUFXO0lBQ1gsYUFBYTtJQUNiLHVCQUF1QjtJQUN2QixtQkFBbUI7SUFDbkIsd0JBQXdCO0lBQ3hCLHFJQUFxSTtBQUN6STs7QUFFQTtJQUNJLHlCQUF5QjtBQUM3Qjs7QUFFQTtJQUNJLGtCQUFrQjtJQUNsQixlQUFlO0FBQ25COztBQUNBO0lBQ0ksZ0JBQWdCO0lBQ2hCLHNCQUFzQjtJQUN0QixrQkFBa0I7SUFDbEIseUJBQXlCO0FBQzdCOztBQUVBO0lBQ0kscUJBQXFCO0lBQ3JCLGtCQUFrQjtJQUNsQixZQUFZO0lBQ1osWUFBWTtBQUNoQjs7QUFFQTtJQUNJO1FBQ0ksZUFBZTtRQUNmLFdBQVc7UUFDWCxjQUFjO1FBQ2QsZ0JBQWdCO0lBQ3BCO0FBQ0oiLCJmaWxlIjoiaG9tZS5jb21wb25lbnQuY3NzIiwic291cmNlc0NvbnRlbnQiOlsiLmNvbnRhaW5lciB7XG4gICAgbWFyZ2luLXRvcDogODBweDtcbiAgICBoZWlnaHQ6IDg1JTtcbiAgICBkaXNwbGF5OiBmbGV4O1xuICAgIGp1c3RpZnktY29udGVudDogY2VudGVyO1xuICAgIGFsaWduLWl0ZW1zOiBjZW50ZXI7XG4gICAgLyogdGV4dC1hbGlnbjogY2VudGVyOyAqL1xuICAgIGJveC1zaGFkb3c6IHJnYmEoNiwgMjQsIDQ0LCAwLjQpIDBweCAwcHggMHB4IDJweCwgcmdiYSg2LCAyNCwgNDQsIDAuNjUpIDBweCA0cHggNnB4IC0xcHgsIHJnYmEoMjU1LCAyNTUsIDI1NSwgMC4wOCkgMHB4IDFweCAwcHggaW5zZXQ7XG59XG5cbi5zY3JvbGxpbmctY29udGFpbmVye1xuICAgIGJhY2tncm91bmQtY29sb3I6ICNFREY1RTE7XG59XG5cbi5oZWFkaW5ne1xuICAgIHRleHQtYWxpZ246IGNlbnRlcjtcbiAgICBjb2xvcjogIzA1Mzg2QiA7XG59XG4uc2xpZGVyLWNvbnRhaW5lcntcbiAgICBtYXJnaW4tdG9wOiAyMHB4O1xuICAgIC8qIG1hcmdpbi1sZWZ0OiA1cHg7ICovXG4gICAgcG9zaXRpb246IHJlbGF0aXZlO1xuICAgIGJvcmRlcjogMXB4IHNvbGlkICNmZmM2ZjA7XG59XG5cbi5mb3JtYXRjb2Rle1xuICAgIHdvcmQtd3JhcDogYnJlYWstd29yZDtcbiAgICBsaW5lLWJyZWFrOiBzdHJpY3Q7XG4gICAgcGFkZGluZzogNXB4O1xuICAgIG1hcmdpbjogMzBweDtcbn1cblxuQG1lZGlhIHNjcmVlbiBhbmQgKCBtYXgtd2lkdGg6IDQwMHB4KSAge1xuICAgIC5jb250YWluZXIge1xuICAgICAgICBtYXJnaW4tdG9wOiAwcHg7XG4gICAgICAgIGhlaWdodDogODUlO1xuICAgICAgICBkaXNwbGF5OiBibG9jaztcbiAgICAgICAgYm94LXNoYWRvdzogbm9uZTtcbiAgICB9XG59XG5cbiJdfQ== */"]
+        directives: [_angular_common__WEBPACK_IMPORTED_MODULE_5__.NgIf, _spinner_spinner_component__WEBPACK_IMPORTED_MODULE_2__.SpinnerComponent, _angular_material_button__WEBPACK_IMPORTED_MODULE_6__.MatButton, _angular_material_icon__WEBPACK_IMPORTED_MODULE_7__.MatIcon],
+        styles: [".home-container[_ngcontent-%COMP%] {\n    margin: 5px;\n    padding: 1px;\n    margin-top: 80px;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    \n    box-shadow: rgba(6, 24, 44, 0.4) 0px 0px 0px 2px, rgba(6, 24, 44, 0.65) 0px 4px 6px -1px, rgba(255, 255, 255, 0.08) 0px 1px 0px inset;\n\n}\n\n.grid[_ngcontent-%COMP%]{\n    display: grid;\n    grid-template-columns: 1fr;\n    \n    margin: 5px;\n    \n}\n\n.heading[_ngcontent-%COMP%]{\n    text-align: center;\n    margin: 5px;\n    padding: 5px;\n}\n\n.formatcode[_ngcontent-%COMP%]{\n    word-wrap: break-word;\n    line-break: strict;\n    padding: 5px;\n    margin: 30px;\n    overflow: scroll;\n    border: 2px solid #ffc6f0 ;\n}\n\n@media screen and ( max-width: 400px)  {\n    .container[_ngcontent-%COMP%] {\n        margin-top: 0px;\n        height: 85%;\n        display: block;\n        box-shadow: none;\n    }\n}\n/*# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbImhvbWUuY29tcG9uZW50LmNzcyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiQUFBQTtJQUNJLFdBQVc7SUFDWCxZQUFZO0lBQ1osZ0JBQWdCO0lBQ2hCLGFBQWE7SUFDYix1QkFBdUI7SUFDdkIsbUJBQW1CO0lBQ25CLHdCQUF3QjtJQUN4QixxSUFBcUk7O0FBRXpJOztBQUVBO0lBQ0ksYUFBYTtJQUNiLDBCQUEwQjs7SUFFMUIsV0FBVztJQUNYLDJJQUEySTtBQUMvSTs7QUFFQTtJQUNJLGtCQUFrQjtJQUNsQixXQUFXO0lBQ1gsWUFBWTtBQUNoQjs7QUFDQTtJQUNJLHFCQUFxQjtJQUNyQixrQkFBa0I7SUFDbEIsWUFBWTtJQUNaLFlBQVk7SUFDWixnQkFBZ0I7SUFDaEIsMEJBQTBCO0FBQzlCOztBQUVBO0lBQ0k7UUFDSSxlQUFlO1FBQ2YsV0FBVztRQUNYLGNBQWM7UUFDZCxnQkFBZ0I7SUFDcEI7QUFDSiIsImZpbGUiOiJob21lLmNvbXBvbmVudC5jc3MiLCJzb3VyY2VzQ29udGVudCI6WyIuaG9tZS1jb250YWluZXIge1xuICAgIG1hcmdpbjogNXB4O1xuICAgIHBhZGRpbmc6IDFweDtcbiAgICBtYXJnaW4tdG9wOiA4MHB4O1xuICAgIGRpc3BsYXk6IGZsZXg7XG4gICAganVzdGlmeS1jb250ZW50OiBjZW50ZXI7XG4gICAgYWxpZ24taXRlbXM6IGNlbnRlcjtcbiAgICAvKiB0ZXh0LWFsaWduOiBjZW50ZXI7ICovXG4gICAgYm94LXNoYWRvdzogcmdiYSg2LCAyNCwgNDQsIDAuNCkgMHB4IDBweCAwcHggMnB4LCByZ2JhKDYsIDI0LCA0NCwgMC42NSkgMHB4IDRweCA2cHggLTFweCwgcmdiYSgyNTUsIDI1NSwgMjU1LCAwLjA4KSAwcHggMXB4IDBweCBpbnNldDtcblxufVxuXG4uZ3JpZHtcbiAgICBkaXNwbGF5OiBncmlkO1xuICAgIGdyaWQtdGVtcGxhdGUtY29sdW1uczogMWZyO1xuICAgIFxuICAgIG1hcmdpbjogNXB4O1xuICAgIC8qIGJveC1zaGFkb3c6IHJnYmEoNiwgMjQsIDQ0LCAwLjQpIDBweCAwcHggMHB4IDJweCwgcmdiYSg2LCAyNCwgNDQsIDAuNjUpIDBweCA0cHggNnB4IC0xcHgsIHJnYmEoMjU1LCAyNTUsIDI1NSwgMC4wOCkgMHB4IDFweCAwcHggaW5zZXQ7ICovXG59XG5cbi5oZWFkaW5ne1xuICAgIHRleHQtYWxpZ246IGNlbnRlcjtcbiAgICBtYXJnaW46IDVweDtcbiAgICBwYWRkaW5nOiA1cHg7XG59XG4uZm9ybWF0Y29kZXtcbiAgICB3b3JkLXdyYXA6IGJyZWFrLXdvcmQ7XG4gICAgbGluZS1icmVhazogc3RyaWN0O1xuICAgIHBhZGRpbmc6IDVweDtcbiAgICBtYXJnaW46IDMwcHg7XG4gICAgb3ZlcmZsb3c6IHNjcm9sbDtcbiAgICBib3JkZXI6IDJweCBzb2xpZCAjZmZjNmYwIDtcbn1cblxuQG1lZGlhIHNjcmVlbiBhbmQgKCBtYXgtd2lkdGg6IDQwMHB4KSAge1xuICAgIC5jb250YWluZXIge1xuICAgICAgICBtYXJnaW4tdG9wOiAwcHg7XG4gICAgICAgIGhlaWdodDogODUlO1xuICAgICAgICBkaXNwbGF5OiBibG9jaztcbiAgICAgICAgYm94LXNoYWRvdzogbm9uZTtcbiAgICB9XG59XG5cbiJdfQ== */"]
       });
       /***/
     },
@@ -5921,7 +6126,7 @@
         }, {
           key: "onSubmit",
           value: function onSubmit(form) {
-            var _this27 = this;
+            var _this29 = this;
 
             if (form.value.heading.trim() == '' || form.value.category.trim() == '' || form.value.tags.trim() == '') {
               this.sharedService.openSnackBar("Please enter mandatory fields", "oops");
@@ -5940,19 +6145,19 @@
               comments: [new Comment()]
             }).subscribe(function (res) {
               console.log(res);
-              _this27.loading = false;
+              _this29.loading = false;
 
-              _this27.sharedService.blogAddedSubject.next(true);
+              _this29.sharedService.blogAddedSubject.next(true);
 
-              _this27.sharedService.openSnackBar("Blog Added successfully", "Yay");
+              _this29.sharedService.openSnackBar("Blog Added successfully", "Yay");
 
               form.reset();
-              _this27.blogtext = '';
+              _this29.blogtext = '';
             }, function (err) {
               console.log(err);
-              _this27.loading = false;
+              _this29.loading = false;
 
-              _this27.sharedService.openSnackBar("Blog Add failed", "Naa");
+              _this29.sharedService.openSnackBar("Blog Add failed", "Naa");
             });
           }
         }, {
@@ -6224,6 +6429,7 @@
           this.route = route;
           this.service = service;
           this.sharedService = sharedService;
+          this.blogtext = '';
           this.toolbar = [["bold", "italic"], ["underline", "strike"], ["code", "blockquote"], ["ordered_list", "bullet_list"], [{
             heading: ["h1", "h2", "h3", "h4", "h5", "h6"]
           }], ["link", "image"], ["text_color", "background_color"], ["align_left", "align_center", "align_right", "align_justify"]];
@@ -6232,24 +6438,25 @@
         _createClass(_EditBlogNewComponent, [{
           key: "ngOnInit",
           value: function ngOnInit() {
-            var _this28 = this;
+            var _this30 = this;
 
             this.editor = new ngx_editor__WEBPACK_IMPORTED_MODULE_2__.Editor();
             this.route.queryParams.subscribe(function (params) {
-              _this28.blogId = params.blogId;
+              _this30.blogId = params.blogId;
+              console.log("blogId", _this30.blogId);
 
-              _this28.service.getBlog(_this28.blogId).subscribe(function (data) {
-                _this28.blogtext = data.blogtext;
-                _this28.heading = data.heading;
-                _this28.category = data.category;
-                _this28.tags = data.tags;
+              _this30.service.getBlog(_this30.blogId).subscribe(function (data) {
+                _this30.blogtext = data.blogtext;
+                _this30.heading = data.heading;
+                _this30.category = data.category;
+                _this30.tags = data.tags;
               });
             });
           }
         }, {
           key: "onSubmit",
           value: function onSubmit(form) {
-            var _this29 = this;
+            var _this31 = this;
 
             console.log(form.value);
             this.loading = true;
@@ -6263,31 +6470,28 @@
               heading: form.value.heading.trim(),
               blogtext: form.value.blogtext.trim(),
               category: form.value.category.trim(),
-              tags: form.value.tags.trim(),
+              tags: form.value.tags.toString().trim(),
               datecreated: new Date(),
               datemodified: new Date(),
               comments: [new Comment()]
             }).subscribe(function (res) {
               console.log(res);
-              _this29.loading = false;
+              _this31.loading = false;
 
-              _this29.sharedService.blogAddedSubject.next(true);
+              _this31.sharedService.blogAddedSubject.next(true);
 
-              _this29.sharedService.openSnackBar("Blog Updated successfully", "Yay");
-
-              form.reset();
-              _this29.blogtext = '';
+              _this31.sharedService.openSnackBar("Blog Updated successfully", "Yay");
             }, function (err) {
               console.log(err);
-              _this29.loading = false;
+              _this31.loading = false;
 
-              _this29.sharedService.openSnackBar("Blog Update failed", "Naa");
+              _this31.sharedService.openSnackBar("Blog Update failed", "Naa");
             });
           }
         }, {
           key: "clearForm",
           value: function clearForm() {
-            this.blogForm.clear();
+            this.blogForm.form.reset({});
             this.blogtext = '';
           }
         }, {
@@ -6324,9 +6528,9 @@
         inputs: {
           blogId: "blogId"
         },
-        decls: 21,
+        decls: 22,
         vars: 4,
-        consts: [[1, "blog-container"], [3, "ngSubmit"], ["blogForm", "ngForm"], ["appearance", "fill", 1, "matinput-container"], ["matInput", "", "name", "heading", "required", "", 3, "ngModel", "ngModelChange"], [1, "NgxEditor__Wrapper"], ["name", "blogtext", "editorUrl", "/assets/ckeditor/ckeditor.js", 3, "ngModel", "ngModelChange", "ready"], ["type", "text", "matInput", "", "placeholder", "category", "name", "category", "required", "", 3, "ngModel", "ngModelChange"], ["type", "text", "matInput", "", "placeholder", "tags", "name", "tags", 3, "ngModel", "ngModelChange"], ["mat-raised-button", "", "color", "accent", "type", "submit"]],
+        consts: [[1, "blog-container"], [3, "ngSubmit"], ["blogForm", "ngForm"], [1, "input-container"], ["appearance", "fill", 1, "matinput-container"], ["matInput", "", "name", "heading", "required", "", 3, "ngModel", "ngModelChange"], ["type", "text", "matInput", "", "placeholder", "category", "name", "category", "required", "", 3, "ngModel", "ngModelChange"], ["type", "text", "matInput", "", "placeholder", "tags", "name", "tags", 3, "ngModel", "ngModelChange"], [1, "NgxEditor__Wrapper"], ["name", "blogtext", "editorUrl", "/assets/ckeditor/ckeditor.js", 3, "ngModel", "ngModelChange", "ready"], [1, "margin-left:", "80px"], ["mat-raised-button", "", "color", "accent", "type", "submit"]],
         template: function EditBlogNewComponent_Template(rf, ctx) {
           if (rf & 1) {
             var _r1 = _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵgetCurrentView"]();
@@ -6345,17 +6549,19 @@
               return ctx.onSubmit(_r0);
             });
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](4, "mat-form-field", 3);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](4, "div", 3);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](5, "mat-label");
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](5, "mat-form-field", 4);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](6, "Blog Heading");
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](6, "mat-label");
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](7, "Blog Heading");
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](7, "input", 4);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](8, "input", 5);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("ngModelChange", function EditBlogNewComponent_Template_input_ngModelChange_7_listener($event) {
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("ngModelChange", function EditBlogNewComponent_Template_input_ngModelChange_8_listener($event) {
               return ctx.heading = $event;
             });
 
@@ -6363,31 +6569,17 @@
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](8, "div", 5);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](9, "mat-form-field", 4);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](9, "ckeditor", 6);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](10, "mat-label");
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("ngModelChange", function EditBlogNewComponent_Template_ckeditor_ngModelChange_9_listener($event) {
-              return ctx.blogtext = $event;
-            })("ready", function EditBlogNewComponent_Template_ckeditor_ready_9_listener() {
-              return ctx.onEditorReady();
-            });
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](11, "Blog Category");
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](12, "input", 6);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](10, "mat-form-field", 3);
-
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](11, "mat-label");
-
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](12, "Blog Category");
-
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
-
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](13, "input", 7);
-
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("ngModelChange", function EditBlogNewComponent_Template_input_ngModelChange_13_listener($event) {
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("ngModelChange", function EditBlogNewComponent_Template_input_ngModelChange_12_listener($event) {
               return ctx.category = $event;
             });
 
@@ -6395,17 +6587,17 @@
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](14, "mat-form-field", 3);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](13, "mat-form-field", 4);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](15, "mat-label");
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](14, "mat-label");
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](16, "Tags");
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](15, "Tags");
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](17, "input", 8);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](16, "input", 7);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("ngModelChange", function EditBlogNewComponent_Template_input_ngModelChange_17_listener($event) {
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("ngModelChange", function EditBlogNewComponent_Template_input_ngModelChange_16_listener($event) {
               return ctx.tags = $event;
             });
 
@@ -6413,11 +6605,27 @@
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](18, "div");
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](19, "button", 9);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](17, "div", 8);
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](20, "Update Blog");
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](18, "ckeditor", 9);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵlistener"]("ngModelChange", function EditBlogNewComponent_Template_ckeditor_ngModelChange_18_listener($event) {
+              return ctx.blogtext = $event;
+            })("ready", function EditBlogNewComponent_Template_ckeditor_ready_18_listener() {
+              return ctx.onEditorReady();
+            });
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](19, "div", 10);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementStart"](20, "button", 11);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵtext"](21, "Update Blog");
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵelementEnd"]();
 
@@ -6431,13 +6639,9 @@
           }
 
           if (rf & 2) {
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](7);
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](8);
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵproperty"]("ngModel", ctx.heading);
-
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](2);
-
-            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵproperty"]("ngModel", ctx.blogtext);
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](4);
 
@@ -6446,10 +6650,14 @@
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](4);
 
             _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵproperty"]("ngModel", ctx.tags);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵadvance"](2);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_3__["ɵɵproperty"]("ngModel", ctx.blogtext);
           }
         },
         directives: [_angular_forms__WEBPACK_IMPORTED_MODULE_5__["ɵNgNoValidate"], _angular_forms__WEBPACK_IMPORTED_MODULE_5__.NgControlStatusGroup, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.NgForm, _angular_material_form_field__WEBPACK_IMPORTED_MODULE_6__.MatFormField, _angular_material_form_field__WEBPACK_IMPORTED_MODULE_6__.MatLabel, _angular_material_input__WEBPACK_IMPORTED_MODULE_7__.MatInput, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.DefaultValueAccessor, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.RequiredValidator, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.NgControlStatus, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.NgModel, ckeditor4_angular__WEBPACK_IMPORTED_MODULE_8__.CKEditorComponent, _angular_material_button__WEBPACK_IMPORTED_MODULE_9__.MatButton],
-        styles: [".blog-container[_ngcontent-%COMP%] {\n    display: flex;\n    flex-direction: column;\n    margin: 10px;\n    padding: 10px;\n    border: 2px solid #ffc6f0;\n    padding: 50px;\n    background-color: #fff6fd;\n    border-radius: 20px;\n    margin-top: 70px;\n\n}\n.blog-container[_ngcontent-%COMP%]   input[_ngcontent-%COMP%] {\n    width: 50%;\n    display: block;\n    color: rgb(122, 14, 155);\n}\n.matinput-container[_ngcontent-%COMP%] {\n    width: 75%;\n  }\n.mat-form-field[_ngcontent-%COMP%]{\n      margin-top: 10px;\n  }\n\n.container[_ngcontent-%COMP%] {\n  width: 75%;\n  max-width: 900px;\n  min-width: 320px;\n  margin: auto;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  min-height: 250px;\n}\n.container[_ngcontent-%COMP%]   .title[_ngcontent-%COMP%] {\n  width: 100%;\n}\n.container[_ngcontent-%COMP%]   .content[_ngcontent-%COMP%] {\n  width: 75%;\n  height: 250px;\n}\n.container[_ngcontent-%COMP%]   .display[_ngcontent-%COMP%] {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  margin-bottom: 1rem;\n}\n.container[_ngcontent-%COMP%]   .logo[_ngcontent-%COMP%] {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  text-align: center;\n  margin-bottom: 0.5rem;\n}\n .editor {\n  border: 2px solid rgba(0, 0, 0, 0.2);\n  border-radius: 4px;\n}\n .NgxEditor__MenuBar {\n  border-top-left-radius: 4px;\n  border-top-right-radius: 4px;\n  border-bottom: 1px solid rgba(0, 0, 0, 0.2);\n\n}\n .NgxEditor {\n  border-top-left-radius: 0;\n  border-top-right-radius: 0;\n  border: none;\n  flex-wrap: wrap;\n\n}\n .NgxEditor__Content {\n    min-height: 300px; \n  }\n .editor .CodeMirror {\n  border: 1px solid #eee;\n  height: auto;\n  margin-bottom: 0.7rem;\n}\n .editor pre {\n  white-space: pre !important;\n}\n@media( max-width: 414px) {\n   .NgxEditor__MenuBar {\n    flex-wrap: wrap;\n   }\n   .matinput-container[_ngcontent-%COMP%] {\n    width: 100%;\n  }\n  .blog-container[_ngcontent-%COMP%] {\n    display: flex;\n    flex-direction: column;\n    border: 2px solid #ffc6f0;\n    background-color: #fff6fd;\n    border-radius: 20px;\n    margin: 5px;\n    padding: 5px;\n    margin-top: 10px;\n\n}\n  \n}\n/*# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbImVkaXQtYmxvZy1uZXcuY29tcG9uZW50LmNzcyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiO0FBQ0E7SUFDSSxhQUFhO0lBQ2Isc0JBQXNCO0lBQ3RCLFlBQVk7SUFDWixhQUFhO0lBQ2IseUJBQXlCO0lBQ3pCLGFBQWE7SUFDYix5QkFBeUI7SUFDekIsbUJBQW1CO0lBQ25CLGdCQUFnQjs7QUFFcEI7QUFDQTtJQUNJLFVBQVU7SUFDVixjQUFjO0lBQ2Qsd0JBQXdCO0FBQzVCO0FBRUE7SUFDSSxVQUFVO0VBQ1o7QUFFQTtNQUNJLGdCQUFnQjtFQUNwQjtBQUdGLFdBQVc7QUFDWDtFQUNFLFVBQVU7RUFDVixnQkFBZ0I7RUFDaEIsZ0JBQWdCO0VBQ2hCLFlBQVk7RUFDWixhQUFhO0VBQ2Isc0JBQXNCO0VBQ3RCLG1CQUFtQjtFQUNuQix1QkFBdUI7RUFDdkIsaUJBQWlCO0FBQ25CO0FBQ0E7RUFDRSxXQUFXO0FBQ2I7QUFFQTtFQUNFLFVBQVU7RUFDVixhQUFhO0FBQ2Y7QUFFQTtFQUNFLGFBQWE7RUFDYixzQkFBc0I7RUFDdEIsbUJBQW1CO0VBQ25CLG1CQUFtQjtBQUNyQjtBQUVBO0VBQ0UsYUFBYTtFQUNiLHNCQUFzQjtFQUN0QixtQkFBbUI7RUFDbkIsa0JBQWtCO0VBQ2xCLHFCQUFxQjtBQUN2QjtBQUVBO0VBQ0Usb0NBQW9DO0VBQ3BDLGtCQUFrQjtBQUNwQjtBQUNBO0VBQ0UsMkJBQTJCO0VBQzNCLDRCQUE0QjtFQUM1QiwyQ0FBMkM7O0FBRTdDO0FBRUE7RUFDRSx5QkFBeUI7RUFDekIsMEJBQTBCO0VBQzFCLFlBQVk7RUFDWixlQUFlOztBQUVqQjtBQUNBO0lBQ0ksaUJBQWlCLEVBQUUsMENBQTBDO0VBQy9EO0FBRUE7RUFDQSxzQkFBc0I7RUFDdEIsWUFBWTtFQUNaLHFCQUFxQjtBQUN2QjtBQUNBO0VBQ0UsMkJBQTJCO0FBQzdCO0FBR0E7RUFDRTtJQUNFLGVBQWU7R0FDaEI7R0FDQTtJQUNDLFdBQVc7RUFDYjtFQUNBO0lBQ0UsYUFBYTtJQUNiLHNCQUFzQjtJQUN0Qix5QkFBeUI7SUFDekIseUJBQXlCO0lBQ3pCLG1CQUFtQjtJQUNuQixXQUFXO0lBQ1gsWUFBWTtJQUNaLGdCQUFnQjs7QUFFcEI7O0FBRUEiLCJmaWxlIjoiZWRpdC1ibG9nLW5ldy5jb21wb25lbnQuY3NzIiwic291cmNlc0NvbnRlbnQiOlsiXG4uYmxvZy1jb250YWluZXIge1xuICAgIGRpc3BsYXk6IGZsZXg7XG4gICAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgICBtYXJnaW46IDEwcHg7XG4gICAgcGFkZGluZzogMTBweDtcbiAgICBib3JkZXI6IDJweCBzb2xpZCAjZmZjNmYwO1xuICAgIHBhZGRpbmc6IDUwcHg7XG4gICAgYmFja2dyb3VuZC1jb2xvcjogI2ZmZjZmZDtcbiAgICBib3JkZXItcmFkaXVzOiAyMHB4O1xuICAgIG1hcmdpbi10b3A6IDcwcHg7XG5cbn1cbi5ibG9nLWNvbnRhaW5lciBpbnB1dCB7XG4gICAgd2lkdGg6IDUwJTtcbiAgICBkaXNwbGF5OiBibG9jaztcbiAgICBjb2xvcjogcmdiKDEyMiwgMTQsIDE1NSk7XG59IFxuXG4ubWF0aW5wdXQtY29udGFpbmVyIHtcbiAgICB3aWR0aDogNzUlO1xuICB9XG5cbiAgLm1hdC1mb3JtLWZpZWxke1xuICAgICAgbWFyZ2luLXRvcDogMTBweDtcbiAgfSBcblxuICBcbi8qIEVkaXRvciAqL1xuLmNvbnRhaW5lciB7XG4gIHdpZHRoOiA3NSU7XG4gIG1heC13aWR0aDogOTAwcHg7XG4gIG1pbi13aWR0aDogMzIwcHg7XG4gIG1hcmdpbjogYXV0bztcbiAgZGlzcGxheTogZmxleDtcbiAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgYWxpZ24taXRlbXM6IGNlbnRlcjtcbiAganVzdGlmeS1jb250ZW50OiBjZW50ZXI7XG4gIG1pbi1oZWlnaHQ6IDI1MHB4O1xufVxuLmNvbnRhaW5lciAudGl0bGUge1xuICB3aWR0aDogMTAwJTtcbn1cblxuLmNvbnRhaW5lciAuY29udGVudCB7XG4gIHdpZHRoOiA3NSU7XG4gIGhlaWdodDogMjUwcHg7XG59XG5cbi5jb250YWluZXIgLmRpc3BsYXkge1xuICBkaXNwbGF5OiBmbGV4O1xuICBmbGV4LWRpcmVjdGlvbjogY29sdW1uO1xuICBhbGlnbi1pdGVtczogY2VudGVyO1xuICBtYXJnaW4tYm90dG9tOiAxcmVtO1xufVxuXG4uY29udGFpbmVyIC5sb2dvIHtcbiAgZGlzcGxheTogZmxleDtcbiAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgYWxpZ24taXRlbXM6IGNlbnRlcjtcbiAgdGV4dC1hbGlnbjogY2VudGVyO1xuICBtYXJnaW4tYm90dG9tOiAwLjVyZW07XG59XG5cbjo6bmctZGVlcC5lZGl0b3Ige1xuICBib3JkZXI6IDJweCBzb2xpZCByZ2JhKDAsIDAsIDAsIDAuMik7XG4gIGJvcmRlci1yYWRpdXM6IDRweDtcbn1cbjo6bmctZGVlcC5OZ3hFZGl0b3JfX01lbnVCYXIge1xuICBib3JkZXItdG9wLWxlZnQtcmFkaXVzOiA0cHg7XG4gIGJvcmRlci10b3AtcmlnaHQtcmFkaXVzOiA0cHg7XG4gIGJvcmRlci1ib3R0b206IDFweCBzb2xpZCByZ2JhKDAsIDAsIDAsIDAuMik7XG5cbn1cblxuOjpuZy1kZWVwLk5neEVkaXRvciB7XG4gIGJvcmRlci10b3AtbGVmdC1yYWRpdXM6IDA7XG4gIGJvcmRlci10b3AtcmlnaHQtcmFkaXVzOiAwO1xuICBib3JkZXI6IG5vbmU7XG4gIGZsZXgtd3JhcDogd3JhcDtcblxufVxuOjpuZy1kZWVwLk5neEVkaXRvcl9fQ29udGVudCB7XG4gICAgbWluLWhlaWdodDogMzAwcHg7IC8qIG1ha2UgYWxsIG9mIHRoZSBlZGl0b3IgYXJlYSBjbGlja2FibGUgKi9cbiAgfVxuXG4gIDo6bmctZGVlcC5lZGl0b3IgLkNvZGVNaXJyb3Ige1xuICBib3JkZXI6IDFweCBzb2xpZCAjZWVlO1xuICBoZWlnaHQ6IGF1dG87XG4gIG1hcmdpbi1ib3R0b206IDAuN3JlbTtcbn1cbjo6bmctZGVlcC5lZGl0b3IgcHJlIHtcbiAgd2hpdGUtc3BhY2U6IHByZSAhaW1wb3J0YW50O1xufVxuXG5cbkBtZWRpYSggbWF4LXdpZHRoOiA0MTRweCkge1xuICA6Om5nLWRlZXAuTmd4RWRpdG9yX19NZW51QmFyIHtcbiAgICBmbGV4LXdyYXA6IHdyYXA7XG4gICB9XG4gICAubWF0aW5wdXQtY29udGFpbmVyIHtcbiAgICB3aWR0aDogMTAwJTtcbiAgfVxuICAuYmxvZy1jb250YWluZXIge1xuICAgIGRpc3BsYXk6IGZsZXg7XG4gICAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgICBib3JkZXI6IDJweCBzb2xpZCAjZmZjNmYwO1xuICAgIGJhY2tncm91bmQtY29sb3I6ICNmZmY2ZmQ7XG4gICAgYm9yZGVyLXJhZGl1czogMjBweDtcbiAgICBtYXJnaW46IDVweDtcbiAgICBwYWRkaW5nOiA1cHg7XG4gICAgbWFyZ2luLXRvcDogMTBweDtcblxufVxuICBcbn0iXX0= */"]
+        styles: [".blog-container[_ngcontent-%COMP%] {\n    display: flex;\n    flex-direction: column;\n    margin: 10px;\n    padding: 10px;\n    border: 2px solid #ffc6f0;\n    padding: 50px;\n    background-color: #fff6fd;\n    border-radius: 20px;\n    margin-top: 70px;\n\n}\n.blog-container[_ngcontent-%COMP%]   input[_ngcontent-%COMP%] {\n    width: 50%;\n    display: block;\n    color: rgb(122, 14, 155);\n}\n.matinput-container[_ngcontent-%COMP%] {\n    \n  }\n.input-container[_ngcontent-%COMP%]{\n    display: grid; \n    grid-template-columns: 1fr 1fr 1fr;\n    grid-gap: 1rem;\n  }\n.mat-form-field[_ngcontent-%COMP%]{\n      margin-top: 10px;\n  }\n\n.container[_ngcontent-%COMP%] {\n  width: 75%;\n  max-width: 900px;\n  min-width: 320px;\n  margin: auto;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  min-height: 250px;\n}\n.container[_ngcontent-%COMP%]   .title[_ngcontent-%COMP%] {\n  width: 100%;\n}\n.container[_ngcontent-%COMP%]   .content[_ngcontent-%COMP%] {\n  width: 75%;\n  height: 250px;\n}\n.container[_ngcontent-%COMP%]   .display[_ngcontent-%COMP%] {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  margin-bottom: 1rem;\n}\n.container[_ngcontent-%COMP%]   .logo[_ngcontent-%COMP%] {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  text-align: center;\n  margin-bottom: 0.5rem;\n}\n .editor {\n  border: 2px solid rgba(0, 0, 0, 0.2);\n  border-radius: 4px;\n}\n .NgxEditor__MenuBar {\n  border-top-left-radius: 4px;\n  border-top-right-radius: 4px;\n  border-bottom: 1px solid rgba(0, 0, 0, 0.2);\n\n}\n .NgxEditor {\n  border-top-left-radius: 0;\n  border-top-right-radius: 0;\n  border: none;\n  flex-wrap: wrap;\n\n}\n .NgxEditor__Content {\n    min-height: 300px; \n  }\n .editor .CodeMirror {\n  border: 1px solid #eee;\n  height: auto;\n  margin-bottom: 0.7rem;\n}\n .editor pre {\n  white-space: pre !important;\n}\n@media( max-width: 414px) {\n   .NgxEditor__MenuBar {\n    flex-wrap: wrap;\n   }\n   .matinput-container[_ngcontent-%COMP%] {\n    width: 100%;\n  }\n  .input-container[_ngcontent-%COMP%]{\n    display: grid; \n    grid-template-columns: 1fr;\n  }\n  .blog-container[_ngcontent-%COMP%] {\n    display: flex;\n    flex-direction: column;\n    border: 2px solid #ffc6f0;\n    background-color: #fff6fd;\n    border-radius: 20px;\n    margin: 5px;\n    padding: 5px;\n    margin-top: 10px;\n\n}\n  \n}\n/*# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbImVkaXQtYmxvZy1uZXcuY29tcG9uZW50LmNzcyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiO0FBQ0E7SUFDSSxhQUFhO0lBQ2Isc0JBQXNCO0lBQ3RCLFlBQVk7SUFDWixhQUFhO0lBQ2IseUJBQXlCO0lBQ3pCLGFBQWE7SUFDYix5QkFBeUI7SUFDekIsbUJBQW1CO0lBQ25CLGdCQUFnQjs7QUFFcEI7QUFDQTtJQUNJLFVBQVU7SUFDVixjQUFjO0lBQ2Qsd0JBQXdCO0FBQzVCO0FBRUE7SUFDSSxnQkFBZ0I7RUFDbEI7QUFDQTtJQUNFLGFBQWE7SUFDYixrQ0FBa0M7SUFDbEMsY0FBYztFQUNoQjtBQUVBO01BQ0ksZ0JBQWdCO0VBQ3BCO0FBR0YsV0FBVztBQUNYO0VBQ0UsVUFBVTtFQUNWLGdCQUFnQjtFQUNoQixnQkFBZ0I7RUFDaEIsWUFBWTtFQUNaLGFBQWE7RUFDYixzQkFBc0I7RUFDdEIsbUJBQW1CO0VBQ25CLHVCQUF1QjtFQUN2QixpQkFBaUI7QUFDbkI7QUFDQTtFQUNFLFdBQVc7QUFDYjtBQUVBO0VBQ0UsVUFBVTtFQUNWLGFBQWE7QUFDZjtBQUVBO0VBQ0UsYUFBYTtFQUNiLHNCQUFzQjtFQUN0QixtQkFBbUI7RUFDbkIsbUJBQW1CO0FBQ3JCO0FBRUE7RUFDRSxhQUFhO0VBQ2Isc0JBQXNCO0VBQ3RCLG1CQUFtQjtFQUNuQixrQkFBa0I7RUFDbEIscUJBQXFCO0FBQ3ZCO0FBRUE7RUFDRSxvQ0FBb0M7RUFDcEMsa0JBQWtCO0FBQ3BCO0FBQ0E7RUFDRSwyQkFBMkI7RUFDM0IsNEJBQTRCO0VBQzVCLDJDQUEyQzs7QUFFN0M7QUFFQTtFQUNFLHlCQUF5QjtFQUN6QiwwQkFBMEI7RUFDMUIsWUFBWTtFQUNaLGVBQWU7O0FBRWpCO0FBQ0E7SUFDSSxpQkFBaUIsRUFBRSwwQ0FBMEM7RUFDL0Q7QUFFQTtFQUNBLHNCQUFzQjtFQUN0QixZQUFZO0VBQ1oscUJBQXFCO0FBQ3ZCO0FBQ0E7RUFDRSwyQkFBMkI7QUFDN0I7QUFHQTtFQUNFO0lBQ0UsZUFBZTtHQUNoQjtHQUNBO0lBQ0MsV0FBVztFQUNiO0VBQ0E7SUFDRSxhQUFhO0lBQ2IsMEJBQTBCO0VBQzVCO0VBQ0E7SUFDRSxhQUFhO0lBQ2Isc0JBQXNCO0lBQ3RCLHlCQUF5QjtJQUN6Qix5QkFBeUI7SUFDekIsbUJBQW1CO0lBQ25CLFdBQVc7SUFDWCxZQUFZO0lBQ1osZ0JBQWdCOztBQUVwQjs7QUFFQSIsImZpbGUiOiJlZGl0LWJsb2ctbmV3LmNvbXBvbmVudC5jc3MiLCJzb3VyY2VzQ29udGVudCI6WyJcbi5ibG9nLWNvbnRhaW5lciB7XG4gICAgZGlzcGxheTogZmxleDtcbiAgICBmbGV4LWRpcmVjdGlvbjogY29sdW1uO1xuICAgIG1hcmdpbjogMTBweDtcbiAgICBwYWRkaW5nOiAxMHB4O1xuICAgIGJvcmRlcjogMnB4IHNvbGlkICNmZmM2ZjA7XG4gICAgcGFkZGluZzogNTBweDtcbiAgICBiYWNrZ3JvdW5kLWNvbG9yOiAjZmZmNmZkO1xuICAgIGJvcmRlci1yYWRpdXM6IDIwcHg7XG4gICAgbWFyZ2luLXRvcDogNzBweDtcblxufVxuLmJsb2ctY29udGFpbmVyIGlucHV0IHtcbiAgICB3aWR0aDogNTAlO1xuICAgIGRpc3BsYXk6IGJsb2NrO1xuICAgIGNvbG9yOiByZ2IoMTIyLCAxNCwgMTU1KTtcbn0gXG5cbi5tYXRpbnB1dC1jb250YWluZXIge1xuICAgIC8qIHdpZHRoOiA3NSU7ICovXG4gIH1cbiAgLmlucHV0LWNvbnRhaW5lcntcbiAgICBkaXNwbGF5OiBncmlkOyBcbiAgICBncmlkLXRlbXBsYXRlLWNvbHVtbnM6IDFmciAxZnIgMWZyO1xuICAgIGdyaWQtZ2FwOiAxcmVtO1xuICB9XG5cbiAgLm1hdC1mb3JtLWZpZWxke1xuICAgICAgbWFyZ2luLXRvcDogMTBweDtcbiAgfSBcblxuICBcbi8qIEVkaXRvciAqL1xuLmNvbnRhaW5lciB7XG4gIHdpZHRoOiA3NSU7XG4gIG1heC13aWR0aDogOTAwcHg7XG4gIG1pbi13aWR0aDogMzIwcHg7XG4gIG1hcmdpbjogYXV0bztcbiAgZGlzcGxheTogZmxleDtcbiAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgYWxpZ24taXRlbXM6IGNlbnRlcjtcbiAganVzdGlmeS1jb250ZW50OiBjZW50ZXI7XG4gIG1pbi1oZWlnaHQ6IDI1MHB4O1xufVxuLmNvbnRhaW5lciAudGl0bGUge1xuICB3aWR0aDogMTAwJTtcbn1cblxuLmNvbnRhaW5lciAuY29udGVudCB7XG4gIHdpZHRoOiA3NSU7XG4gIGhlaWdodDogMjUwcHg7XG59XG5cbi5jb250YWluZXIgLmRpc3BsYXkge1xuICBkaXNwbGF5OiBmbGV4O1xuICBmbGV4LWRpcmVjdGlvbjogY29sdW1uO1xuICBhbGlnbi1pdGVtczogY2VudGVyO1xuICBtYXJnaW4tYm90dG9tOiAxcmVtO1xufVxuXG4uY29udGFpbmVyIC5sb2dvIHtcbiAgZGlzcGxheTogZmxleDtcbiAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgYWxpZ24taXRlbXM6IGNlbnRlcjtcbiAgdGV4dC1hbGlnbjogY2VudGVyO1xuICBtYXJnaW4tYm90dG9tOiAwLjVyZW07XG59XG5cbjo6bmctZGVlcC5lZGl0b3Ige1xuICBib3JkZXI6IDJweCBzb2xpZCByZ2JhKDAsIDAsIDAsIDAuMik7XG4gIGJvcmRlci1yYWRpdXM6IDRweDtcbn1cbjo6bmctZGVlcC5OZ3hFZGl0b3JfX01lbnVCYXIge1xuICBib3JkZXItdG9wLWxlZnQtcmFkaXVzOiA0cHg7XG4gIGJvcmRlci10b3AtcmlnaHQtcmFkaXVzOiA0cHg7XG4gIGJvcmRlci1ib3R0b206IDFweCBzb2xpZCByZ2JhKDAsIDAsIDAsIDAuMik7XG5cbn1cblxuOjpuZy1kZWVwLk5neEVkaXRvciB7XG4gIGJvcmRlci10b3AtbGVmdC1yYWRpdXM6IDA7XG4gIGJvcmRlci10b3AtcmlnaHQtcmFkaXVzOiAwO1xuICBib3JkZXI6IG5vbmU7XG4gIGZsZXgtd3JhcDogd3JhcDtcblxufVxuOjpuZy1kZWVwLk5neEVkaXRvcl9fQ29udGVudCB7XG4gICAgbWluLWhlaWdodDogMzAwcHg7IC8qIG1ha2UgYWxsIG9mIHRoZSBlZGl0b3IgYXJlYSBjbGlja2FibGUgKi9cbiAgfVxuXG4gIDo6bmctZGVlcC5lZGl0b3IgLkNvZGVNaXJyb3Ige1xuICBib3JkZXI6IDFweCBzb2xpZCAjZWVlO1xuICBoZWlnaHQ6IGF1dG87XG4gIG1hcmdpbi1ib3R0b206IDAuN3JlbTtcbn1cbjo6bmctZGVlcC5lZGl0b3IgcHJlIHtcbiAgd2hpdGUtc3BhY2U6IHByZSAhaW1wb3J0YW50O1xufVxuXG5cbkBtZWRpYSggbWF4LXdpZHRoOiA0MTRweCkge1xuICA6Om5nLWRlZXAuTmd4RWRpdG9yX19NZW51QmFyIHtcbiAgICBmbGV4LXdyYXA6IHdyYXA7XG4gICB9XG4gICAubWF0aW5wdXQtY29udGFpbmVyIHtcbiAgICB3aWR0aDogMTAwJTtcbiAgfVxuICAuaW5wdXQtY29udGFpbmVye1xuICAgIGRpc3BsYXk6IGdyaWQ7IFxuICAgIGdyaWQtdGVtcGxhdGUtY29sdW1uczogMWZyO1xuICB9XG4gIC5ibG9nLWNvbnRhaW5lciB7XG4gICAgZGlzcGxheTogZmxleDtcbiAgICBmbGV4LWRpcmVjdGlvbjogY29sdW1uO1xuICAgIGJvcmRlcjogMnB4IHNvbGlkICNmZmM2ZjA7XG4gICAgYmFja2dyb3VuZC1jb2xvcjogI2ZmZjZmZDtcbiAgICBib3JkZXItcmFkaXVzOiAyMHB4O1xuICAgIG1hcmdpbjogNXB4O1xuICAgIHBhZGRpbmc6IDVweDtcbiAgICBtYXJnaW4tdG9wOiAxMHB4O1xuXG59XG4gIFxufSJdfQ== */"]
       });
       /***/
     },
@@ -7176,7 +7384,7 @@
 
       var _TimeLineViewComponent = /*#__PURE__*/function () {
         function _TimeLineViewComponent(dataService, router, sharedService, dialog) {
-          var _this30 = this;
+          var _this32 = this;
 
           _classCallCheck(this, _TimeLineViewComponent);
 
@@ -7191,7 +7399,7 @@
           this.noofticks = 5;
           this.stepsize = this.endpos / this.noofticks;
           this.ticksarr = [this.startpos].concat(_toConsumableArray(_toConsumableArray(Array(this.noofticks).keys()).map(function (x) {
-            return (x + 1) * _this30.endpos / _this30.noofticks;
+            return (x + 1) * _this32.endpos / _this32.noofticks;
           })), [this.endpos]); // datesarr = ["2021-01-01", "2021-02-01", "2021-03-01", "2021-04-01", "2021-05-01", , "2021-06-01"]
 
           this.datesset = new Set();
@@ -7256,18 +7464,18 @@
         }, {
           key: "fetchDataFromDB",
           value: function fetchDataFromDB() {
-            var _this31 = this;
+            var _this33 = this;
 
             this.dataService.getBlogs().subscribe(function (data) {
-              _this31.processInput(data);
+              _this33.processInput(data);
 
-              _this31.processBlogs(_this31.blogItems);
+              _this33.processBlogs(_this33.blogItems);
             });
           }
         }, {
           key: "processInput",
           value: function processInput(data) {
-            var _this32 = this;
+            var _this34 = this;
 
             // get the keys in the data
             // for each key create an object with date as key : [all the blogs as an array]
@@ -7277,17 +7485,17 @@
               blogObj["toggle"] = false;
               var catKey = blogObj["category"] || 'NA';
               if (catKey == 'NA') console.log("blogObj", blogObj);
-              var tagsKey = _this32.tagsObj[catKey];
+              var tagsKey = _this34.tagsObj[catKey];
 
-              _this32.categoriesset.add(catKey);
+              _this34.categoriesset.add(catKey);
 
               var tagslocal = blogObj["tags"] || "";
               if (tagsKey) tagslocal.split(' ').forEach(function (x) {
-                return _this32.tagsObj[catKey].add(x);
-              });else _this32.tagsObj[catKey] = new Set(_toConsumableArray(tagslocal.split(' ')));
+                return _this34.tagsObj[catKey].add(x);
+              });else _this34.tagsObj[catKey] = new Set(_toConsumableArray(tagslocal.split(' ')));
               var dateKey = blogObj["datecreated"].split("T")[0]; // blogObj["datecreated"] = new Date(blogObj["datecreated"])
 
-              dateKey in _this32.blogItems ? _this32.blogItems[dateKey].push(blogObj) : _this32.blogItems[dateKey] = [blogObj]; // this.datesset.add(blogObj["datecreated"].split("T")[0])
+              dateKey in _this34.blogItems ? _this34.blogItems[dateKey].push(blogObj) : _this34.blogItems[dateKey] = [blogObj]; // this.datesset.add(blogObj["datecreated"].split("T")[0])
             });
             this.filteredBlogs = Object.assign({}, this.blogItems);
             this.tempFilteredBlogs = Object.assign({}, this.filteredBlogs); //console.log('blog array structure', this.blogItems)
@@ -7313,12 +7521,12 @@
         }, {
           key: "setTicks",
           value: function setTicks() {
-            var _this33 = this;
+            var _this35 = this;
 
             this.noofticks = this.datesarr.length;
             this.stepsize = this.endpos / this.noofticks;
             this.ticksarr = [this.startpos].concat(_toConsumableArray(_toConsumableArray(Array(this.noofticks).keys()).map(function (x) {
-              return (x + 1) * _this33.endpos / _this33.noofticks;
+              return (x + 1) * _this35.endpos / _this35.noofticks;
             })), [this.endpos]);
             this.loading = false;
           }
@@ -7512,7 +7720,7 @@
         }, {
           key: "openDialog",
           value: function openDialog(event, blogId) {
-            var _this34 = this;
+            var _this36 = this;
 
             var dialogRef = this.dialog.open(src_app_dialogs_confirm_dialog_confirm_dialog_component__WEBPACK_IMPORTED_MODULE_0__.ConfirmDialogComponent, {
               width: '250px',
@@ -7525,23 +7733,23 @@
               console.log('The dialog was closed' + result);
 
               if (result == true) {
-                _this34.onDeletePost(event, blogId);
+                _this36.onDeletePost(event, blogId);
               }
             });
           }
         }, {
           key: "onDeletePost",
           value: function onDeletePost(event, blogId) {
-            var _this35 = this;
+            var _this37 = this;
 
             this.dataService.deletePost(blogId).subscribe(function (msg) {
-              _this35.sharedService.openSnackBar('Post Deleted Successfully', 'Tadaaa');
+              _this37.sharedService.openSnackBar('Post Deleted Successfully', 'Tadaaa');
 
-              _this35.fetchDataFromDB();
+              _this37.fetchDataFromDB();
             }, function (err) {
               console.log(err);
 
-              _this35.sharedService.openSnackBar('Post Delete failed', 'Ding...');
+              _this37.sharedService.openSnackBar('Post Delete failed', 'Ding...');
             });
           }
         }]);
@@ -7642,6 +7850,12 @@
       var _angular_forms__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(
       /*! @angular/forms */
       1707);
+      /* harmony import */
+
+
+      var _angular_material_button__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(
+      /*! @angular/material/button */
+      70781);
 
       var _c0 = ["blogForm"]; // import * as Editor from '../../../../ckeditor5/build/ckeditor';
       // import * as Editor from '../../../../ckeditor/ckeditor';
@@ -7655,7 +7869,6 @@
           this.sharedService = sharedService;
           this.heading = '';
           this.category = '';
-          this.tags = '';
           this.editorConfig = {
             height: '550px',
             uiColor: '#F7B42C',
@@ -7688,16 +7901,17 @@
         _createClass(_ViewBlogNewComponent, [{
           key: "ngOnInit",
           value: function ngOnInit() {
-            var _this36 = this;
+            var _this38 = this;
 
             this.route.queryParams.subscribe(function (params) {
-              _this36.blogId = params.blogId;
+              _this38.blogId = params.blogId;
 
-              _this36.service.getBlog(_this36.blogId).subscribe(function (data) {
-                _this36.blogtext = data.blogtext;
-                _this36.heading = data.heading;
-                _this36.category = data.category;
-                _this36.tags = data.tags;
+              _this38.service.getBlog(_this38.blogId).subscribe(function (data) {
+                console.log("data", data);
+                _this38.blogtext = data.blogtext;
+                _this38.heading = data.heading;
+                _this38.category = data.category;
+                _this38.tags = data.tags;
               });
             });
           }
@@ -7708,6 +7922,33 @@
           key: "showCode",
           value: function showCode() {
             console.log(this.template);
+          }
+        }, {
+          key: "saveBlog",
+          value: function saveBlog() {
+            var _this39 = this;
+
+            this.service.updateBlog(this.blogId, {
+              heading: this.heading,
+              blogtext: this.blogtext,
+              category: this.category,
+              tags: this.tags,
+              datecreated: new Date(),
+              datemodified: new Date(),
+              comments: [new Comment()]
+            }).subscribe(function (res) {
+              console.log(res);
+              _this39.loading = false;
+
+              _this39.sharedService.blogAddedSubject.next(true);
+
+              _this39.sharedService.openSnackBar("Changes saved successfully", "Yay");
+            }, function (err) {
+              console.log(err);
+              _this39.loading = false;
+
+              _this39.sharedService.openSnackBar("Blog Update failed", "Naa");
+            });
           }
         }]);
 
@@ -7735,9 +7976,9 @@
         inputs: {
           blogId: "blogId"
         },
-        decls: 15,
+        decls: 19,
         vars: 4,
-        consts: [[2, "margin-top", "100px"], [1, "editor-container"], [1, "blog-header"], [1, "title"], [1, "extra"], [1, "info"], ["name", "blogtext", "editorUrl", "/assets/ckeditor/ckeditor.js", 3, "ngModel", "ngModelChange", "ready"]],
+        consts: [[2, "margin-top", "100px"], [1, "editor-container"], [1, "blog-header"], [1, "title"], [1, "extra"], [1, "info"], ["name", "blogtext", "editorUrl", "/assets/ckeditor/ckeditor.js", 3, "ngModel", "ngModelChange", "ready"], [1, "margin-top:", "20px"], ["mat-raised-button", "", "color", "accent", "type", "submit", 3, "click"]],
         template: function ViewBlogNewComponent_Template(rf, ctx) {
           if (rf & 1) {
             _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelement"](0, "div", 0);
@@ -7786,13 +8027,31 @@
 
             _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementEnd"]();
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementStart"](14, "ckeditor", 6);
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementStart"](14, "div");
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵlistener"]("ngModelChange", function ViewBlogNewComponent_Template_ckeditor_ngModelChange_14_listener($event) {
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementStart"](15, "ckeditor", 6);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵlistener"]("ngModelChange", function ViewBlogNewComponent_Template_ckeditor_ngModelChange_15_listener($event) {
               return ctx.blogtext = $event;
-            })("ready", function ViewBlogNewComponent_Template_ckeditor_ready_14_listener() {
+            })("ready", function ViewBlogNewComponent_Template_ckeditor_ready_15_listener() {
               return ctx.onEditorReady();
             });
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementEnd"]();
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementEnd"]();
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementStart"](16, "div", 7);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementStart"](17, "button", 8);
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵlistener"]("click", function ViewBlogNewComponent_Template_button_click_17_listener() {
+              return ctx.saveBlog();
+            });
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵtext"](18, "Save Changes");
+
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementEnd"]();
 
             _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵelementEnd"]();
 
@@ -7812,12 +8071,12 @@
 
             _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵtextInterpolate1"]("Tags: ", ctx.tags, "");
 
-            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵadvance"](1);
+            _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵadvance"](2);
 
             _angular_core__WEBPACK_IMPORTED_MODULE_2__["ɵɵproperty"]("ngModel", ctx.blogtext);
           }
         },
-        directives: [ckeditor4_angular__WEBPACK_IMPORTED_MODULE_4__.CKEditorComponent, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.NgControlStatus, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.NgModel],
+        directives: [ckeditor4_angular__WEBPACK_IMPORTED_MODULE_4__.CKEditorComponent, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.NgControlStatus, _angular_forms__WEBPACK_IMPORTED_MODULE_5__.NgModel, _angular_material_button__WEBPACK_IMPORTED_MODULE_6__.MatButton],
         styles: [".ck-editor__editable {\n    min-height: 500px !important;\n}\n .ck-editor__editable_inline {\n    min-height: 500px !important;\n}\n.editor-container[_ngcontent-%COMP%]{\n    display: flex;\n    flex-direction: column;\n    margin: auto;\n    width: 80%;\n}\n.blog[_ngcontent-%COMP%] {\n    border: 1px solid rgb(226 195 219);\n    padding: 10px;\n    margin: 10px;\n  }\n.blog[_ngcontent-%COMP%]   p[_ngcontent-%COMP%] {\n    line-break: strict;\n    white-space: pre-wrap;\n  }\n.blog-header[_ngcontent-%COMP%] {\n    display: flex;\n    flex-direction: column;\n    justify-content: space-between;\n    border-bottom: 1px solid #ffc6f0;\n  }\n.blog-header[_ngcontent-%COMP%]   .title[_ngcontent-%COMP%] {\n    display: flex;\n    flex-direction: row;\n    justify-content: space-between;\n  }\n.blog-header[_ngcontent-%COMP%]   .extra[_ngcontent-%COMP%] {\n    display: flex;\n    flex-direction: row;\n    justify-content: space-between;\n    margin: 5px;\n    padding: 5px;\n  }\n.blog-header[_ngcontent-%COMP%]   .extra[_ngcontent-%COMP%]   .info[_ngcontent-%COMP%] {\n    display: flex;\n    justify-content: space-between;\n  }\n.blog-header[_ngcontent-%COMP%]   .extra[_ngcontent-%COMP%]   .info[_ngcontent-%COMP%]    > *[_ngcontent-%COMP%] {\n    margin-right: 10px;\n    font-size: 16px;\n  }\n.title-right[_ngcontent-%COMP%]    > *[_ngcontent-%COMP%] {\n    margin-right: 10px;\n  }\n/*# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbInZpZXctYmxvZy1uZXcuY29tcG9uZW50LmNzcyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiQUFBQTtJQUNJLDRCQUE0QjtBQUNoQztBQUNBO0lBQ0ksNEJBQTRCO0FBQ2hDO0FBR0E7SUFDSSxhQUFhO0lBQ2Isc0JBQXNCO0lBQ3RCLFlBQVk7SUFDWixVQUFVO0FBQ2Q7QUFFQTtJQUNJLGtDQUFrQztJQUNsQyxhQUFhO0lBQ2IsWUFBWTtFQUNkO0FBQ0E7SUFDRSxrQkFBa0I7SUFDbEIscUJBQXFCO0VBQ3ZCO0FBQ0E7SUFDRSxhQUFhO0lBQ2Isc0JBQXNCO0lBQ3RCLDhCQUE4QjtJQUM5QixnQ0FBZ0M7RUFDbEM7QUFDQTtJQUNFLGFBQWE7SUFDYixtQkFBbUI7SUFDbkIsOEJBQThCO0VBQ2hDO0FBQ0E7SUFDRSxhQUFhO0lBQ2IsbUJBQW1CO0lBQ25CLDhCQUE4QjtJQUM5QixXQUFXO0lBQ1gsWUFBWTtFQUNkO0FBQ0E7SUFDRSxhQUFhO0lBQ2IsOEJBQThCO0VBQ2hDO0FBQ0E7SUFDRSxrQkFBa0I7SUFDbEIsZUFBZTtFQUNqQjtBQUNBO0lBQ0Usa0JBQWtCO0VBQ3BCIiwiZmlsZSI6InZpZXctYmxvZy1uZXcuY29tcG9uZW50LmNzcyIsInNvdXJjZXNDb250ZW50IjpbIjo6bmctZGVlcC5jay1lZGl0b3JfX2VkaXRhYmxlIHtcbiAgICBtaW4taGVpZ2h0OiA1MDBweCAhaW1wb3J0YW50O1xufVxuOjpuZy1kZWVwLmNrLWVkaXRvcl9fZWRpdGFibGVfaW5saW5lIHtcbiAgICBtaW4taGVpZ2h0OiA1MDBweCAhaW1wb3J0YW50O1xufVxuXG5cbi5lZGl0b3ItY29udGFpbmVye1xuICAgIGRpc3BsYXk6IGZsZXg7XG4gICAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgICBtYXJnaW46IGF1dG87XG4gICAgd2lkdGg6IDgwJTtcbn1cblxuLmJsb2cge1xuICAgIGJvcmRlcjogMXB4IHNvbGlkIHJnYigyMjYgMTk1IDIxOSk7XG4gICAgcGFkZGluZzogMTBweDtcbiAgICBtYXJnaW46IDEwcHg7XG4gIH1cbiAgLmJsb2cgcCB7XG4gICAgbGluZS1icmVhazogc3RyaWN0O1xuICAgIHdoaXRlLXNwYWNlOiBwcmUtd3JhcDtcbiAgfVxuICAuYmxvZy1oZWFkZXIge1xuICAgIGRpc3BsYXk6IGZsZXg7XG4gICAgZmxleC1kaXJlY3Rpb246IGNvbHVtbjtcbiAgICBqdXN0aWZ5LWNvbnRlbnQ6IHNwYWNlLWJldHdlZW47XG4gICAgYm9yZGVyLWJvdHRvbTogMXB4IHNvbGlkICNmZmM2ZjA7XG4gIH1cbiAgLmJsb2ctaGVhZGVyIC50aXRsZSB7XG4gICAgZGlzcGxheTogZmxleDtcbiAgICBmbGV4LWRpcmVjdGlvbjogcm93O1xuICAgIGp1c3RpZnktY29udGVudDogc3BhY2UtYmV0d2VlbjtcbiAgfVxuICAuYmxvZy1oZWFkZXIgLmV4dHJhIHtcbiAgICBkaXNwbGF5OiBmbGV4O1xuICAgIGZsZXgtZGlyZWN0aW9uOiByb3c7XG4gICAganVzdGlmeS1jb250ZW50OiBzcGFjZS1iZXR3ZWVuO1xuICAgIG1hcmdpbjogNXB4O1xuICAgIHBhZGRpbmc6IDVweDtcbiAgfVxuICAuYmxvZy1oZWFkZXIgLmV4dHJhIC5pbmZvIHtcbiAgICBkaXNwbGF5OiBmbGV4O1xuICAgIGp1c3RpZnktY29udGVudDogc3BhY2UtYmV0d2VlbjtcbiAgfVxuICAuYmxvZy1oZWFkZXIgLmV4dHJhIC5pbmZvID4gKiB7XG4gICAgbWFyZ2luLXJpZ2h0OiAxMHB4O1xuICAgIGZvbnQtc2l6ZTogMTZweDtcbiAgfVxuICAudGl0bGUtcmlnaHQgPiAqIHtcbiAgICBtYXJnaW4tcmlnaHQ6IDEwcHg7XG4gIH1cbiAgIl19 */"]
       });
       /***/
@@ -8056,16 +8315,16 @@
         }, {
           key: "fetchDataFromDB",
           value: function fetchDataFromDB() {
-            var _this37 = this;
+            var _this40 = this;
 
             this.dataService.getBlogs().subscribe(function (data) {
-              _this37.processInput(data);
+              _this40.processInput(data);
             });
           }
         }, {
           key: "processInput",
           value: function processInput(data) {
-            var _this38 = this;
+            var _this41 = this;
 
             // get the keys in the data
             // for each key create an object with date as key : [all the blogs as an array]
@@ -8078,17 +8337,17 @@
               blogObj["toggle"] = false;
               var catKey = blogObj["category"] || 'NA';
               if (catKey == 'NA') console.log("blogObj", blogObj);
-              var tagsKey = _this38.tagsObj[catKey];
+              var tagsKey = _this41.tagsObj[catKey];
 
-              _this38.categoriesset.add(catKey);
+              _this41.categoriesset.add(catKey);
 
               var tagslocal = blogObj["tags"] || "";
               if (tagsKey) tagslocal.split(' ').forEach(function (x) {
-                return _this38.tagsObj[catKey].add(x);
-              });else _this38.tagsObj[catKey] = new Set(_toConsumableArray(tagslocal.split(' ')));
+                return _this41.tagsObj[catKey].add(x);
+              });else _this41.tagsObj[catKey] = new Set(_toConsumableArray(tagslocal.split(' ')));
               var dateKey = blogObj["datecreated"].split("T")[0]; // blogObj["datecreated"] = new Date(blogObj["datecreated"])
 
-              dateKey in _this38.blogItems ? _this38.blogItems[dateKey].push(blogObj) : _this38.blogItems[dateKey] = [blogObj]; // this.datesset.add(blogObj["datecreated"].split("T")[0])
+              dateKey in _this41.blogItems ? _this41.blogItems[dateKey].push(blogObj) : _this41.blogItems[dateKey] = [blogObj]; // this.datesset.add(blogObj["datecreated"].split("T")[0])
             });
             this.filteredBlogs = Object.assign({}, this.blogItems);
             this.tempFilteredBlogs = Object.assign({}, this.filteredBlogs); //console.log('blog array structure', this.blogItems) 
@@ -8585,19 +8844,19 @@
         }, {
           key: "fetchDataFromDB",
           value: function fetchDataFromDB() {
-            var _this39 = this;
+            var _this42 = this;
 
             this.loading = true;
             this.dataService.getBlogs().subscribe(function (data) {
-              _this39.processInput(data);
+              _this42.processInput(data);
 
-              _this39.loading = false;
+              _this42.loading = false;
             });
           }
         }, {
           key: "processInput",
           value: function processInput(data) {
-            var _this40 = this;
+            var _this43 = this;
 
             Object.keys(data).forEach(function (key) {
               var blogObj = data[key];
@@ -8605,15 +8864,15 @@
               blogObj["toggle"] = false;
               var catKey = blogObj["category"] || 'NA';
               if (catKey == 'NA') console.log("blogObj", blogObj);
-              var tagsKey = _this40.tagsObj[catKey];
+              var tagsKey = _this43.tagsObj[catKey];
 
-              _this40.categoriesset.add(catKey);
+              _this43.categoriesset.add(catKey);
 
-              var tagslocal = blogObj["tags"] || "";
+              var tagslocal = blogObj["tags"].toString() || "";
               if (tagsKey) tagslocal.split(' ').forEach(function (x) {
-                return _this40.tagsObj[catKey].add(x);
-              });else _this40.tagsObj[catKey] = new Set(_toConsumableArray(tagslocal.split(' ')));
-              catKey in _this40.blogItems ? _this40.blogItems[catKey].push(blogObj) : _this40.blogItems[catKey] = [blogObj];
+                return _this43.tagsObj[catKey].add(x);
+              });else _this43.tagsObj[catKey] = new Set(_toConsumableArray(tagslocal.split(' ')));
+              catKey in _this43.blogItems ? _this43.blogItems[catKey].push(blogObj) : _this43.blogItems[catKey] = [blogObj];
             });
             this.categories = _toConsumableArray(this.categoriesset);
             this.filteredBlogs = Object.assign({}, this.blogItems);
@@ -8691,7 +8950,7 @@
         }, {
           key: "openDialog",
           value: function openDialog(event) {
-            var _this41 = this;
+            var _this44 = this;
 
             var dialogRef = this.dialog.open(src_app_dialogs_confirm_dialog_confirm_dialog_component__WEBPACK_IMPORTED_MODULE_0__.ConfirmDialogComponent, {
               width: '250px',
@@ -8704,23 +8963,23 @@
               console.log('The dialog was closed' + result);
 
               if (result == true) {
-                _this41.onDeletePost();
+                _this44.onDeletePost();
               }
             });
           }
         }, {
           key: "onDeletePost",
           value: function onDeletePost() {
-            var _this42 = this;
+            var _this45 = this;
 
             this.dataService.deletePost(this.id).subscribe(function (msg) {
-              _this42.sharedService.openSnackBar('Post Deleted Successfully', 'Tadaaa');
+              _this45.sharedService.openSnackBar('Post Deleted Successfully', 'Tadaaa');
 
-              _this42.fetchDataFromDB();
+              _this45.fetchDataFromDB();
             }, function (err) {
               console.log(err);
 
-              _this42.sharedService.openSnackBar('Post Delete failed', 'Ding...');
+              _this45.sharedService.openSnackBar('Post Delete failed', 'Ding...');
             });
           }
         }, {
